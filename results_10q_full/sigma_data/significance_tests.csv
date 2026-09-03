@@ -1,0 +1,11 @@
+ham,baseline,statistic,p_value,mean_diff,n,direction
+"TFIM (J=1, h=0.5)",Adam (best),4.0,1.3e-05,-0.070908,20,SIGMA better
+"TFIM (J=1, h=0.5)",COBYLA,0.0,2e-06,-0.365483,20,SIGMA better
+"TFIM (J=1, h=0.5)",SPSA,0.0,2e-06,-0.379513,20,SIGMA better
+"TFIM (J=1, h=0.5)",Diag-QNG,0.0,2e-06,-0.284506,20,SIGMA better
+"TFIM (J=1, h=0.5)",QN-SPSA,0.0,2e-06,-1.34777,20,SIGMA better
+"XXZ (Jxy=1, Jz=0.5, h=0.1)",Adam (best),77.0,0.311794,0.015522,20,Baseline better
+"XXZ (Jxy=1, Jz=0.5, h=0.1)",COBYLA,0.0,2e-06,-3.70065,20,SIGMA better
+"XXZ (Jxy=1, Jz=0.5, h=0.1)",SPSA,0.0,2e-06,-6.319694,20,SIGMA better
+"XXZ (Jxy=1, Jz=0.5, h=0.1)",Diag-QNG,26.0,0.001986,-0.145186,20,SIGMA better
+"XXZ (Jxy=1, Jz=0.5, h=0.1)",QN-SPSA,0.0,2e-06,-14.417086,20,SIGMA better
