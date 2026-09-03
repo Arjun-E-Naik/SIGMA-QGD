@@ -1,14 +1,4 @@
-import argparse
 
-"""
-SIGMA-QGD v9.0 -- PennyLane/GPU port (lightning.gpu / cuQuantum)
-
-
-Install:
-  pip install pennylane
-  pip install pennylane-lightning-gpu   # needs NVIDIA GPU + CUDA + cuQuantum
-  # falls back to: pip install pennylane-lightning  (CPU, still fast)
-"""
 
 import argparse
 import json
@@ -2221,10 +2211,7 @@ def test_cost_and_gradient_matches_separate():
 
 
 def test_shot_noise_actually_varies():
-    """>>> NEW: regression test for the bug in your log -- confirms that
-    different n_shots values on ShotNoiseCostEvaluator actually produce
-    different (stochastic) energies for the same theta, instead of the
-    identical analytic value every time."""
+
     n, r = 3, 1
     H = build_tfim(n)
     theta = np.random.uniform(-0.5, 0.5, n * r)
@@ -2234,8 +2221,8 @@ def test_shot_noise_actually_varies():
     vals_5000 = [cf_5000(theta) for _ in range(5)]
     assert np.std(vals_100) > 0, \
         "Shots are not producing stochastic results (std==0) -- shots binding broken."
-    # low-shot variance should typically exceed high-shot variance
-    assert np.std(vals_100) >= 0.0  # sanity, always true
+   
+    assert np.std(vals_100) >= 0.0  
     print(f"[test_shot_noise_actually_varies] std@100shots={np.std(vals_100):.4f} "
           f"std@5000shots={np.std(vals_5000):.4f}  PASSED")
     return True
