@@ -1,0 +1,10 @@
+ham,config,statistic,p_value,ratio,n
+TFIM,No escape,0.0,1.0,1.0,5
+TFIM,No preconditioner,0.0,0.0625,3.9102,5
+TFIM,No momentum,1.0,0.125,1.842,5
+TFIM,No CUSUM,0.0,1.0,1.0,5
+TFIM,No VSNG,0.0,1.0,1.0,5
+TFIM,With annealing,0.0,1.0,1.0,5
+TFIM,No clipping,0.0,1.0,1.0,5
+TFIM,With drift correct.,0.0,0.0625,0.9999,5
+TFIM,With escape+CUSUM,0.0,1.0,1.0,5
