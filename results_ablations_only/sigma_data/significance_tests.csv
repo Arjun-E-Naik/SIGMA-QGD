@@ -1,0 +1,6 @@
+ham,baseline,statistic,p_value,mean_diff,n,direction
+"TFIM (J=1, h=0.5)",Adam (best),0.0,0.0625,-0.117843,5,SIGMA better
+"TFIM (J=1, h=0.5)",COBYLA,0.0,0.0625,-0.398777,5,SIGMA better
+"TFIM (J=1, h=0.5)",SPSA,0.0,0.0625,-0.418005,5,SIGMA better
+"TFIM (J=1, h=0.5)",Diag-QNG,0.0,0.0625,-0.376883,5,SIGMA better
+"TFIM (J=1, h=0.5)",QN-SPSA,0.0,0.0625,-0.749213,5,SIGMA better
