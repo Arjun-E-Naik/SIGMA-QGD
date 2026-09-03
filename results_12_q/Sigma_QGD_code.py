@@ -1,12 +1,4 @@
-import argparse
-"""
-SIGMA-QGD v9.0 -- PennyLane/GPU port (lightning.gpu / cuQuantum)
 
-Install:
-  pip install pennylane
-  pip install pennylane-lightning-gpu   # needs NVIDIA GPU + CUDA + cuQuantum
-  # falls back to: pip install pennylane-lightning  (CPU, still fast)
-"""
 
 import argparse
 import json
@@ -607,7 +599,7 @@ class CostEvaluator:
         return tape
 
     def _batch_execute(self, tapes):
-        # PennyLane API differs slightly across versions; try both entry points.
+     
         try:
             return self.device.batch_execute(tapes)
         except AttributeError:
@@ -659,8 +651,7 @@ class CostEvaluator:
 
     def overlap_call(self, sv_base: np.ndarray,
                      theta_shift: np.ndarray) -> float:
-        """Diag-QNG overlap. Not on the batched GPU path (single small
-        statevector op), same tradeoff as the qiskit version's Statevector use."""
+
         self.n_calls += 1
         with qml.tape.QuantumTape() as tape:
             ansatz_fn(theta_shift, self.n_qubits, self.reps)
@@ -678,14 +669,7 @@ class CostEvaluator:
 
 
 class ShotNoiseCostEvaluator:
-    """
-     instead of manually injecting Gaussian shot noise on top of an
-    exact expectation (as the Qiskit version did via a variance estimate),
-    PennyLane devices natively support `shots=` for statistically sampled
-    expectation values. We create a shots-enabled device on the same
-    backend (GPU if available) and let the device itself produce the
-    noisy estimate -- more faithful than reconstructing noise manually.
-    """
+
 
     def __init__(self, n_qubits: int, reps: int, H: qml.Hamiltonian,
                  n_shots: int = 1024):
@@ -981,7 +965,7 @@ def run_adam(cost_fn, theta_init: np.ndarray, max_steps: int = 200,
     best_e = np.inf; eh = []; gh = []; ch = []
     t0 = time.time()
     for t in range(1, max_steps + 1):
-        cost, g = cost_fn.cost_and_gradient(theta)   # >>> GPU: batched call
+        cost, g = cost_fn.cost_and_gradient(theta)  
         m = b1*m + (1-b1)*g; v = b2*v + (1-b2)*g**2
         mh = m/(1-b1**t); vh = v/(1-b2**t)
         theta -= lr * mh / (np.sqrt(vh) + eps)
@@ -1045,7 +1029,7 @@ def run_diag_qng(cost_fn, theta_init: np.ndarray, max_steps: int = 200,
         g     = cost_fn.gradient(theta)
         gnorm = float(np.linalg.norm(g))
 
-        sv_base = cost_fn.statevector(theta)   # >>> GPU: PennyLane statevector
+        sv_base = cost_fn.statevector(theta)  
 
         F_diag = np.ones(p)
         for i in range(p):
