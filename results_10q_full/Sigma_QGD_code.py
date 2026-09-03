@@ -1,13 +1,6 @@
 import argparse
 
-"""
-SIGMA-QGD v9.0 -- PennyLane/GPU port (lightning.gpu / cuQuantum)
 
-Install:
-  pip install pennylane
-  pip install pennylane-lightning-gpu   # needs NVIDIA GPU + CUDA + cuQuantum
-  # falls back to: pip install pennylane-lightning  (CPU, still fast)
-"""
 
 import argparse
 import json
@@ -53,17 +46,7 @@ _GPU_STATUS = "CPU (default.qubit)"
 
 
 def _make_device(n_qubits: int):
-    """
-    Try, in order:
-      1. lightning.gpu (cuQuantum / cuStateVec backend)
-      2. lightning.qubit (fast CPU C++ backend)
-      3. default.qubit (pure-Python fallback)
-    Returns (device, status_string).
 
-    NOTE: devices are always constructed WITHOUT `shots=` here. Shot noise
-    is applied per-tape (see CostEvaluator._tape / ShotNoiseCostEvaluator)
-    so the same analytic device can serve both noiseless and noisy calls.
-    """
     try:
         dev = qml.device("lightning.gpu", wires=n_qubits)
         qc = qml.tape.QuantumTape()
@@ -570,7 +553,7 @@ def exact_gs(H: qml.Hamiltonian) -> float:
 
 
 # ===================================================================
-# Ansatz (>>> GPU: builds a PennyLane quantum function, not a QuantumCircuit)
+# Ansatz ( builds a PennyLane quantum function, not a QuantumCircuit)
 # ===================================================================
 
 def ansatz_fn(theta, n: int, reps: int):
@@ -591,23 +574,7 @@ def build_ansatz(n: int, reps: int):
 
 
 class CostEvaluator:
-    """
-    Wraps a PennyLane device (lightning.gpu / lightning.qubit / default.qubit);
-    counts circuit evaluations.
 
-     GPU: cost_and_gradient(theta) batches the energy eval + all 2p
-    parameter-shift circuits into ONE device call (list of QuantumTapes
-    handed to device.execute / device.batch_execute / qml.execute),
-    mirroring the Aer Estimator batching trick -- this is what lets the
-    GPU amortize kernel launch overhead across many circuits instead of
-    doing p+1 sequential small statevector evals.
-
-    `shots`: if given (int), every expectation-value tape built by
-    `_tape()` carries that shot count, so execution is a finite-shot
-    sample rather than an exact expectation. Leave as None for analytic
-    (noiseless) evaluation. `statevector()`/`overlap_call()` (used only
-    by Diag-QNG) intentionally stay analytic regardless of self.shots.
-    """
 
     def __init__(self, n_qubits: int, reps: int, H: qml.Hamiltonian,
                  device=None, shots: Optional[int] = None):
@@ -686,8 +653,7 @@ class CostEvaluator:
 
     def overlap_call(self, sv_base: np.ndarray,
                      theta_shift: np.ndarray) -> float:
-        """Diag-QNG overlap. Always analytic (statevector), regardless of
-        self.shots -- same tradeoff as the qiskit version's Statevector use."""
+
         self.n_calls += 1
         with qml.tape.QuantumTape() as tape:
             ansatz_fn(theta_shift, self.n_qubits, self.reps)
@@ -716,7 +682,7 @@ class ShotNoiseCostEvaluator:
         self.H        = H
         self.n_shots  = n_shots
         self.n_calls  = 0
-        device, status = _make_device(n_qubits)   # analytic device, no shots kwarg
+        device, status = _make_device(n_qubits)   
         self.device = device
         self.status = status
         self.base = CostEvaluator(n_qubits, reps, H, device=self.device,
@@ -858,7 +824,7 @@ def run_sigma_qgd_v9(cost_fn, theta_init: np.ndarray,
         alarm        = cusum.alarm() if use_cusum else np.zeros(p, dtype=bool)
 
         if t <= cfg["warmup"] or not use_vsng:
-            cost, g       = cost_fn.cost_and_gradient(theta)  # >>> GPU: batched
+            cost, g       = cost_fn.cost_and_gradient(theta)  
             n_step_circs += 2 * p + 1
         else:
             cost          = cost_fn(theta)
@@ -1000,7 +966,7 @@ def run_adam(cost_fn, theta_init: np.ndarray, max_steps: int = 200,
     best_e = np.inf; eh = []; gh = []; ch = []
     t0 = time.time()
     for t in range(1, max_steps + 1):
-        cost, g = cost_fn.cost_and_gradient(theta)   # >>> GPU: batched call
+        cost, g = cost_fn.cost_and_gradient(theta) 
         m = b1*m + (1-b1)*g; v = b2*v + (1-b2)*g**2
         mh = m/(1-b1**t); vh = v/(1-b2**t)
         theta -= lr * mh / (np.sqrt(vh) + eps)
@@ -1064,8 +1030,7 @@ def run_diag_qng(cost_fn, theta_init: np.ndarray, max_steps: int = 200,
         g     = cost_fn.gradient(theta)
         gnorm = float(np.linalg.norm(g))
 
-        sv_base = cost_fn.statevector(theta)   # >>> GPU: PennyLane statevector
-
+        sv_base = cost_fn.statevector(theta)  
         F_diag = np.ones(p)
         for i in range(p):
             theta_shift    = theta.copy(); theta_shift[i] += np.pi
@@ -1076,7 +1041,7 @@ def run_diag_qng(cost_fn, theta_init: np.ndarray, max_steps: int = 200,
         theta -= lr * d
 
         eh.append(cost); gh.append(gnorm)
-        ch.append(3 * p + 2)   # +1 for sv_base, +1 per-dim overlap, +cost, +2p grad
+        ch.append(3 * p + 2)  
         if cost < best_e: best_e = cost
         if gnorm < 1e-6: break
 
@@ -2011,10 +1976,7 @@ def test_cost_and_gradient_matches_separate():
 
 
 def test_shot_noise_actually_varies():
-    """>>> NEW: regression test for the bug in your log -- confirms that
-    different n_shots values on ShotNoiseCostEvaluator actually produce
-    different (stochastic) energies for the same theta, instead of the
-    identical analytic value every time."""
+
     n, r = 3, 1
     H = build_tfim(n)
     theta = np.random.uniform(-0.5, 0.5, n * r)
@@ -2024,8 +1986,8 @@ def test_shot_noise_actually_varies():
     vals_5000 = [cf_5000(theta) for _ in range(5)]
     assert np.std(vals_100) > 0, \
         "Shots are not producing stochastic results (std==0) -- shots binding broken."
-    # low-shot variance should typically exceed high-shot variance
-    assert np.std(vals_100) >= 0.0  # sanity, always true
+   
+    assert np.std(vals_100) >= 0.0 
     print(f"[test_shot_noise_actually_varies] std@100shots={np.std(vals_100):.4f} "
           f"std@5000shots={np.std(vals_5000):.4f}  PASSED")
     return True
@@ -2113,7 +2075,7 @@ if __name__ == "__main__":
         drift_correction= args.drift_correction,
     )
 
-    # Probe/print backend status up front using a throwaway device.
+   
     _probe_dev, _GPU_STATUS = _make_device(max(args.qubits, 1))
     del _probe_dev
 
