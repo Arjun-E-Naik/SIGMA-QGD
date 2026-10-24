@@ -1,0 +1,32 @@
+% Consolidated Finite-Shot Noise and CMA-ES Comparison Table
+\begin{table*}[t]
+\centering
+\small
+\caption{\textbf{Comprehensive finite-shot robustness and derivative-free metaheuristic comparison ($N=15$ independent seeds).} 
+\textbf{Top:} Exact ground-state energy gap $|E(\theta^*) - E_0|$ across finite shot budgets $M \in \{100, 500, 1000, 5000, 10000, \infty\}$. All parameter vectors are re-evaluated on a noiseless simulator to prevent downward noise-selection bias. 
+\textbf{Bottom:} Strict circuit-budget-matched comparison against CMA-ES under finite shot noise ($M=1024$ shots). Both algorithms run for identical cumulative quantum circuit budgets ($200 \times (2p+1)$ evaluations).}
+\label{tab:shot_noise_cma_consolidated}
+\begin{tabular}{lcccc}
+\toprule
+\multicolumn{5}{c}{\textbf{Part I: SIGMA-QGD Finite-Shot Scaling ($|E(\theta^*) - E_0|$ in Hartree)}} \\
+\midrule
+\textbf{Shot Budget ($M$)} & \textbf{TFIM ($n=10$, $p=30$)} & \textbf{TFIM ($n=12$, $p=36$)} & \textbf{XXZ ($n=10$, $p=30$)} & \textbf{XXZ ($n=12$, $p=36$)} \\
+\midrule
+Noiseless & 0.0098 ± 0.0023 & 0.0115 ± 0.0015 & 1.3565 ± 0.6480 & 1.6883 ± 0.7615 \\
+100 shots & 0.4298 ± 0.1223 & 0.6109 ± 0.1751 & 2.2997 ± 0.8286 & 2.5896 ± 0.8340 \\
+500 shots & 0.1514 ± 0.0310 & 0.2337 ± 0.0724 & 1.8139 ± 0.7896 & 1.8802 ± 0.6601 \\
+1,000 shots & 0.1086 ± 0.0515 & 0.1356 ± 0.0332 & 1.7688 ± 0.8078 & 1.7989 ± 0.6730 \\
+5,000 shots & 0.0645 ± 0.0527 & 0.0730 ± 0.0106 & 1.4169 ± 0.6596 & 1.7411 ± 0.7227 \\
+10,000 shots & 0.0324 ± 0.0078 & 0.0586 ± 0.0134 & 1.4037 ± 0.6428 & 1.9320 ± 0.8344 \\
+\midrule
+\multicolumn{5}{c}{\textbf{Part II: Budget-Matched Head-to-Head Comparison: SIGMA-QGD vs. CMA-ES ($M=1024$ Shots)}} \\
+\midrule
+\textbf{Regime} & \textbf{Circuit Budget} & \textbf{SIGMA-QGD Gap} & \textbf{CMA-ES Gap} & \textbf{Wilcoxon $p$ (Advantage)} \\
+\midrule
+TFIM ($n=10$, $p=30$) & 12,200 circ & 0.1042 ± 0.0306 & 0.5333 ± 0.0447 & $p=6.10e-05$ (5.12×) \\
+TFIM ($n=12$, $p=36$) & 14,600 circ & 0.1489 ± 0.0247 & 0.6721 ± 0.0463 & $p=6.10e-05$ (4.51×) \\
+XXZ ($n=10$, $p=30$) & 12,200 circ & 1.6874 ± 0.7592 & 2.3549 ± 1.0307 & $p=0.0125$ (1.40×) \\
+XXZ ($n=12$, $p=36$) & 14,600 circ & 1.5937 ± 0.5412 & 2.3019 ± 0.7787 & $p=0.0043$ (1.44×) \\
+\bottomrule
+\end{tabular}
+\end{table*}

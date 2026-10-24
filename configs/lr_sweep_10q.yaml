@@ -1,0 +1,18 @@
+# LR sweep: find best learning rate per gradient-based optimizer
+# Tuned with optimal sensitivity parameters: multiplier=1.0, lambda_reg=0.005
+# Only methods with supports_lr=True are included:
+#   SIGMA-QGD v9.0, Adam, AdaBelief, RMSProp, Yogi, H-QNG (Shi&Wang), Diag-Hessian
+experiment: lr_sweep
+hamiltonian: both
+n_qubits: 10
+reps: 3
+n_seeds: 10
+max_steps: 200
+lr_values: [0.001, 0.005, 0.01, 0.05, 0.1]
+# Leave methods null to auto-select all LR-capable methods from the registry
+methods: null
+sigma_qgd:
+  multiplier: 1.0
+  lambda_reg: 0.005
+  use_restarts: false
+out_tag: "lr_sweep_both_10q"

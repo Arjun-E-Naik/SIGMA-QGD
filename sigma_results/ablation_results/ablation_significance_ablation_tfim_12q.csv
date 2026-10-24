@@ -1,0 +1,5 @@
+ham,config,n_qubits,statistic,p_value,p_value_holm,ratio,n,interpretation
+TFIM,No preconditioner,12,0.0,6.1e-05,0.000244,50.9217,15,removed component was helpful
+TFIM,No momentum,12,0.0,6.1e-05,0.000244,49.7957,15,removed component was helpful
+TFIM,No clipping,12,0.0,0.317311,0.634622,1.0095,15,no measurable effect
+TFIM,With drift correct.,12,51.0,0.638672,0.638672,0.9821,15,no measurable effect

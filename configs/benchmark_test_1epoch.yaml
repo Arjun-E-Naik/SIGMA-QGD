@@ -1,0 +1,23 @@
+# Test Benchmark: 2-step smoke test with optimal LRs
+experiment: benchmark
+hamiltonian: tfim
+n_qubits: 10
+reps: 2
+n_seeds: 1
+max_steps: 2
+methods:
+  - "SIGMA-QGD v9.0"
+  - "Adam"
+  - "H-QNG (Shi&Wang)"
+  - "AdaBelief"
+  - "RMSProp"
+  - "Yogi"
+  - "Diag-Hessian"
+sigma_qgd:
+  eta_0: 0.1
+  lambda_reg: 0.005
+  multiplier: 1.0
+  use_restarts: false
+baselines:
+  use_optimal_lrs: true
+out_tag: "test_smoke"

@@ -1,0 +1,6 @@
+config,gap_mean,gap_std,circuits_mean,ratio,n_seeds,n_qubits,interpretation
+Full v9.0,1.688013,0.76139,14600.0,1.0,15,12,(base)
+No preconditioner,2.034911,0.703107,14600.0,1.21,15,12,removed component was helpful
+No momentum,1.97034,0.500118,14600.0,1.17,15,12,removed component was helpful
+No clipping,1.688013,0.76139,14600.0,1.0,15,12,no measurable effect
+With drift correct.,1.59795,0.684743,14600.0,0.95,15,12,no measurable effect

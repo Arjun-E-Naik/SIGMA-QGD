@@ -1,0 +1,17 @@
+% Consolidated Curvature-Proxy Validation Table
+\begin{table*}[htbp]
+\centering
+\small
+\caption{Step-by-step correlation between log gradient trajectory variance $\log \hat{\sigma}_i^2$ and exact analytic diagonal Hessian magnitude $\log |H_{ii}|$ along 200-step SIGMA-QGD trajectories across physical Hamiltonians and system sizes ($N=15$ seeds, $>394{,}000$ total coordinate evaluations). Wilcoxon signed-rank test evaluates $H_0: \text{correlation} \le 0$.}
+\label{tab:hessian_corr_consolidated}
+\begin{tabular}{lcccccc}
+\toprule
+\textbf{Model} & \textbf{System Size} & \textbf{Evaluations/Seed} & \textbf{Pearson $r$ (Log-Space)} & \textbf{Wilcoxon $p$} & \textbf{Spearman $\rho$} & \textbf{Wilcoxon $p$} \\
+\midrule
+TFIM (Longitudinal/Transverse) & 10 qubits ($p=30$) & 5,970 & 0.5665 $\pm$ 0.0577 & $6.1 \times 10^{-5}$ & 0.3715 $\pm$ 0.0998 & $6.1 \times 10^{-5}$ \\
+TFIM (Longitudinal/Transverse) & 12 qubits ($p=36$) & 7,164 & 0.6256 $\pm$ 0.0301 & $6.1 \times 10^{-5}$ & 0.4474 $\pm$ 0.0745 & $6.1 \times 10^{-5}$ \\
+XXZ (Heisenberg Exchange) & 10 qubits ($p=30$) & 5,970 & 0.3196 $\pm$ 0.0829 & $6.1 \times 10^{-5}$ & 0.1162 $\pm$ 0.1416 & $0.010$ \\
+XXZ (Heisenberg Exchange) & 12 qubits ($p=36$) & 7,164 & 0.2938 $\pm$ 0.0914 & $6.1 \times 10^{-5}$ & 0.1113 $\pm$ 0.1404 & $0.004$ \\
+\bottomrule
+\end{tabular}
+\end{table*}

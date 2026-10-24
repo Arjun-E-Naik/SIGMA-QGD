@@ -1,0 +1,10 @@
+# CMA-ES vs SIGMA-QGD under shot noise (budget-matched)
+experiment: cma_sigma
+hamiltonian: both
+n_qubits: 4
+reps: 2
+n_seeds: 5
+max_steps: 100
+cma_shots: 1024
+cma_sigma0: 0.3
+out_tag: "cma_both_4q"

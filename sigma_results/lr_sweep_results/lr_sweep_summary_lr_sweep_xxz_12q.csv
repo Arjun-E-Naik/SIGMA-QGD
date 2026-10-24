@@ -1,0 +1,9 @@
+method,best_lr,best_gap,best_std,ham,n_qubits,n_seeds
+SIGMA-QGD v9.0,0.1,1.853805,0.767226,"XXZ (Jxy=1, Jz=0.5, h=0.1)",12,5
+Adam,0.1,2.345755,0.896485,"XXZ (Jxy=1, Jz=0.5, h=0.1)",12,5
+AdaBelief,0.01,1.793386,0.71274,"XXZ (Jxy=1, Jz=0.5, h=0.1)",12,5
+RMSProp,0.05,1.579471,0.594057,"XXZ (Jxy=1, Jz=0.5, h=0.1)",12,5
+Yogi,0.1,2.392123,0.904913,"XXZ (Jxy=1, Jz=0.5, h=0.1)",12,5
+H-QNG (Shi&Wang),0.001,1.921801,0.679547,"XXZ (Jxy=1, Jz=0.5, h=0.1)",12,5
+H-QNG,0.001,1.921801,0.679547,"XXZ (Jxy=1, Jz=0.5, h=0.1)",12,5
+Diag-Hessian,0.1,2.434991,0.845292,"XXZ (Jxy=1, Jz=0.5, h=0.1)",12,5

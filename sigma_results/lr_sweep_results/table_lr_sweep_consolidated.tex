@@ -1,0 +1,22 @@
+% Consolidated Learning Rate Sweep Table for Springer LNCS / QIP
+\begin{table*}[htbp]
+\centering
+\small
+\caption{Predeclared learning rate sweep results across 7 gradient-based optimizers ($200$ steps). 10-qubit experiments evaluated over $N=10$ independent random seeds; 12-qubit experiments evaluated over $N=5$ seeds. Reported values indicate the optimal step size $\eta^*$ and resulting mean ground-state energy gap $\Delta E \pm \sigma$.}
+\label{tab:lr_sweep_summary}
+\begin{tabular}{lcccccccc}
+\toprule
+\multirow{2}{*}{\textbf{Method}} & \multicolumn{2}{c}{\textbf{TFIM 10q ($N=10$)}} & \multicolumn{2}{c}{\textbf{TFIM 12q ($N=5$)}} & \multicolumn{2}{c}{\textbf{XXZ 10q ($N=10$)}} & \multicolumn{2}{c}{\textbf{XXZ 12q ($N=5$)}} \\
+\cmidrule(lr){2-3} \cmidrule(lr){4-5} \cmidrule(lr){6-7} \cmidrule(lr){8-9}
+& $\eta^*$ & $\Delta E$ (Ha) & $\eta^*$ & $\Delta E$ (Ha) & $\eta^*$ & $\Delta E$ (Ha) & $\eta^*$ & $\Delta E$ (Ha) \\
+\midrule
+\textbf{SIGMA-QGD v9.0} & \textbf{0.1} & \textbf{0.0091 $\pm$ 0.0018} & \textbf{0.1} & \textbf{0.0107 $\pm$ 0.0008} & \textbf{0.1} & \textbf{1.2670 $\pm$ 0.5183} & 0.1 & 1.8538 $\pm$ 0.7672 \\
+Adam & 0.1 & 0.1020 $\pm$ 0.1000 & 0.1 & 0.1377 $\pm$ 0.0596 & 0.1 & 2.2947 $\pm$ 0.9253 & 0.1 & 2.3458 $\pm$ 0.8965 \\
+AdaBelief & 0.1 & 0.0751 $\pm$ 0.0858 & 0.1 & 0.1128 $\pm$ 0.0577 & 0.1 & 2.4898 $\pm$ 0.8771 & 0.01 & 1.7934 $\pm$ 0.7127 \\
+Yogi & 0.1 & 0.1092 $\pm$ 0.1070 & 0.1 & 0.1662 $\pm$ 0.0957 & 0.1 & 2.3267 $\pm$ 0.9600 & 0.1 & 2.3921 $\pm$ 0.9049 \\
+RMSProp & 0.01 & 0.3876 $\pm$ 0.0530 & 0.01 & 0.4757 $\pm$ 0.0561 & 0.05 & 2.3214 $\pm$ 0.8798 & \textbf{0.05} & \textbf{1.5795 $\pm$ 0.5941} \\
+Diag-Hessian & 0.1 & 0.4374 $\pm$ 0.0054 & 0.1 & 0.5588 $\pm$ 0.0050 & 0.1 & 1.9296 $\pm$ 0.7444 & 0.1 & 2.4350 $\pm$ 0.8453 \\
+H-QNG (Shi\&Wang) & 0.001 & 0.4400 $\pm$ 0.0215 & 0.001 & 0.5370 $\pm$ 0.0447 & 0.001 & 2.0225 $\pm$ 0.8297 & 0.001 & 1.9218 $\pm$ 0.6795 \\
+\bottomrule
+\end{tabular}
+\end{table*}

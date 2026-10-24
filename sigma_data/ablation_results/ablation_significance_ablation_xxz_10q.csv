@@ -1,0 +1,5 @@
+ham,config,n_qubits,statistic,p_value,p_value_holm,ratio,n,interpretation
+XXZ,No preconditioner,10,9.0,0.002014,0.008056,1.1413,15,removed component was helpful
+XXZ,No momentum,10,24.0,0.04126,0.12378,1.41,15,removed component was helpful
+XXZ,No clipping,10,0.0,0.317311,0.634622,1.0,15,no measurable effect
+XXZ,With drift correct.,10,57.0,0.890381,0.890381,1.0241,15,no measurable effect

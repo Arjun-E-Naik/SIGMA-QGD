@@ -1,0 +1,27 @@
+# Benchmark: TFIM + XXZ, 10 qubits — production run with independently optimal LRs
+experiment: benchmark
+hamiltonian: both
+n_qubits: 10
+reps: 3
+n_seeds: 20
+max_steps: 200
+methods:
+  - "SIGMA-QGD v9.0"
+  - "Adam"
+  - "H-QNG (Shi&Wang)"
+  - "COBYLA"
+  - "SPSA"
+  - "Diag-QNG"
+  - "QN-SPSA"
+  - "AdaBelief"
+  - "RMSProp"
+  - "Yogi"
+  - "Diag-Hessian"
+sigma_qgd:
+  eta_0: 0.1
+  lambda_reg: 0.005
+  multiplier: 1.0
+  use_restarts: false
+baselines:
+  use_optimal_lrs: true
+out_tag: "benchmark_both_10q"

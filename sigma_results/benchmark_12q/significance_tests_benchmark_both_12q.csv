@@ -1,0 +1,21 @@
+ham,baseline,n_qubits,n_seeds,statistic,p_value,p_value_holm,mean_diff,n,direction
+"TFIM (J=1, h=0.5)",Adam,12,20,0.0,2e-06,2e-05,-0.158788,20,SIGMA better
+"TFIM (J=1, h=0.5)",H-QNG (Shi&Wang),12,20,0.0,2e-06,2e-05,-0.538454,20,SIGMA better
+"TFIM (J=1, h=0.5)",COBYLA,12,20,0.0,2e-06,2e-05,-0.666896,20,SIGMA better
+"TFIM (J=1, h=0.5)",SPSA,12,20,0.0,2e-06,2e-05,-0.714675,20,SIGMA better
+"TFIM (J=1, h=0.5)",Diag-QNG,12,20,0.0,2e-06,2e-05,-0.40598,20,SIGMA better
+"TFIM (J=1, h=0.5)",QN-SPSA,12,20,0.0,2e-06,2e-05,-3.917697,20,SIGMA better
+"TFIM (J=1, h=0.5)",AdaBelief,12,20,0.0,2e-06,2e-05,-0.130904,20,SIGMA better
+"TFIM (J=1, h=0.5)",RMSProp,12,20,0.0,2e-06,2e-05,-0.483578,20,SIGMA better
+"TFIM (J=1, h=0.5)",Yogi,12,20,0.0,2e-06,2e-05,-0.17487,20,SIGMA better
+"TFIM (J=1, h=0.5)",Diag-Hessian,12,20,0.0,2e-06,2e-05,-0.549706,20,SIGMA better
+"XXZ (Jxy=1, Jz=0.5, h=0.1)",Adam,12,20,39.0,0.012079,0.072474,-0.303001,20,SIGMA better
+"XXZ (Jxy=1, Jz=0.5, h=0.1)",H-QNG (Shi&Wang),12,20,34.0,0.00639,0.04473,-0.492398,20,SIGMA better
+"XXZ (Jxy=1, Jz=0.5, h=0.1)",COBYLA,12,20,0.0,2e-06,2e-05,-2.980446,20,SIGMA better
+"XXZ (Jxy=1, Jz=0.5, h=0.1)",SPSA,12,20,0.0,2e-06,2e-05,-5.481655,20,SIGMA better
+"XXZ (Jxy=1, Jz=0.5, h=0.1)",Diag-QNG,12,20,73.0,0.245487,0.490974,-0.119419,20,SIGMA better
+"XXZ (Jxy=1, Jz=0.5, h=0.1)",QN-SPSA,12,20,0.0,1.91e-06,1.91e-06,-10.171996,20,SIGMA better
+"XXZ (Jxy=1, Jz=0.5, h=0.1)",AdaBelief,12,20,52.0,0.048441,0.159956,-0.224549,20,SIGMA better
+"XXZ (Jxy=1, Jz=0.5, h=0.1)",RMSProp,12,20,87.0,0.521673,0.521673,-0.084004,20,SIGMA better
+"XXZ (Jxy=1, Jz=0.5, h=0.1)",Yogi,12,20,50.0,0.039989,0.159956,-0.228936,20,SIGMA better
+"XXZ (Jxy=1, Jz=0.5, h=0.1)",Diag-Hessian,12,20,43.0,0.019234,0.09617,-0.868262,20,SIGMA better

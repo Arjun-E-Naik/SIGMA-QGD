@@ -1,0 +1,7 @@
+n_shots,gap_mean,gap_std,n_seeds,n_qubits,wilcoxon_p,direction
+inf,1.356521,0.647961,15,10,,-- (reference)
+100,2.299669,0.828642,15,10,6.1e-05,noiseless better
+500,1.81386,0.789598,15,10,0.000122,noiseless better
+1000,1.768756,0.807823,15,10,6.1e-05,noiseless better
+5000,1.416928,0.659579,15,10,0.168823,noiseless better
+10000,1.403666,0.642825,15,10,0.005371,noiseless better

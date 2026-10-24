@@ -1,0 +1,13 @@
+# Shot-noise robustness experiment
+experiment: shot_noise
+hamiltonian: both
+n_qubits: 10
+reps: 3
+n_seeds: 15
+max_steps: 200
+shot_counts: [100, 500, 1000, 5000, 10000]
+sigma_qgd:
+  eta_0: 0.1
+  multiplier: 1.0
+  lambda_reg: 0.005
+out_tag: "shotnoise_both_12q"
