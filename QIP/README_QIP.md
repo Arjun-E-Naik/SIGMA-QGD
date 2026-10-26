@@ -49,34 +49,4 @@ QIP/
 
 ---
 
-## 3. Formatting & Compliance Upgrades
 
-1. **Independent Theorem Numbering:**  
-   In `sn-jnl.cls`, theorem environments have independent counters. Proposition 1 is named **Proposition 1**, Proposition 2 is **Proposition 2**, Proposition 3 is **Proposition 3**, Lemma 1 is **Lemma 1**, and Theorem 1 is **Theorem 1**. All in-text citations (`\ref{...}`) match their names exactly.
-2. **Table Width Protection (`\resizebox{\columnwidth}{!}{...}`):**  
-   Bypasses `sn-jnl`'s `threeparttable` environment wrapper via `tableorg`, dynamically scaling every table so that wide multi-column tables (such as Table 3, Table 5, and Table 6) **never overflow the right margin or get cut off**.
-3. **Sequential Citation Ordering (1 to 28):**  
-   All 28 literature citations appear in strictly increasing, monotonically ordered sequence from `[1]` to `[28]`. No forward jumps or out-of-order references.
-4. **Verbatim Clickable DOIs:**  
-   All DOIs are formatted with `\url{https://doi.org/...}`, ensuring underscores (`_`) render properly in PDF viewers.
-5. **No External Datasets Clarification:**  
-   The Data Availability section explicitly clarifies that no external empirical datasets are used; all physical Hamiltonians are defined analytically, and simulation trajectory logs are available on GitHub.
-6. **Declarations Section:**  
-   Contains all mandatory Springer Nature declarations (Funding, Competing Interests, Author Contributions using CRediT, Data Availability, Code Availability, Ethics, and Generative AI Disclosure).
-
----
-
-## 4. How to Compile or Upload to Overleaf
-
-### Option A: Upload to Overleaf (Recommended)
-1. Download or select `QIP_submission_package.zip`.
-2. On [Overleaf](https://www.overleaf.com/), click **New Project** $\to$ **Upload Project** and select `QIP_submission_package.zip`.
-3. Set the compiler to **pdfLaTeX**; compile `main.tex`.
-
-### Option B: Local Compilation
-```bash
-cd QIP
-pdflatex main.tex
-pdflatex main.tex
-```
-*(You may also compile `main_standard.tex` on any standard TeX distribution).*
