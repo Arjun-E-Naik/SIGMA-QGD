@@ -1,0 +1,926 @@
+\documentclass[11pt,a4paper]{article}
+
+\usepackage[utf8]{inputenc}
+\usepackage[margin=1in]{geometry}
+\usepackage{amsmath,amssymb,amsfonts,amsthm}
+\usepackage{booktabs}
+\usepackage{graphicx}
+\usepackage{algorithm}
+\usepackage{algorithmic}
+\usepackage{hyperref}
+\usepackage{cite}
+\usepackage{microtype}
+\usepackage{subcaption}
+\usepackage{xcolor}
+\usepackage{array}
+\usepackage{multirow}
+\usepackage{placeins}
+\usepackage{url}
+
+\providecommand{\doi}[1]{\href{https://doi.org/#1}{doi:#1}}
+\hyphenation{SIGMA-QGD}
+
+% --- Relax float layout parameters to prevent float clustering and end-dumping ---
+\renewcommand{\topfraction}{0.95}
+\renewcommand{\bottomfraction}{0.95}
+\renewcommand{\textfraction}{0.05}
+\renewcommand{\floatpagefraction}{0.85}
+
+\newtheorem{theorem}{Theorem}
+\newtheorem{lemma}{Lemma}
+\newtheorem{proposition}{Proposition}
+\newtheorem{corollary}{Corollary}
+\newtheorem{assumption}{Assumption}
+\newtheorem{remark}{Remark}
+
+\hypersetup{colorlinks=true, linkcolor=blue!70!black, citecolor=green!50!black, urlcolor=blue!80!black}
+
+\title{\textbf{SIGMA-QGD: A Zero-Extra-Circuit, Variance-Aware Curvature Proxy for Variational Quantum Eigensolvers}}
+
+\author{
+    \textbf{Arjun E Naik}$^{1,*}$ \quad \textbf{Jitendra Tembhurne}$^{1}$ \\[1ex]
+    $^{1}$Department of Computer Science and Engineering, Indian Institute of Information Technology, Nagpur, India \\
+    $^{*}$Corresponding author: \texttt{bt24csd005@iiitn.ac.in}
+}
+\date{}
+
+\begin{document}
+\maketitle
+
+\begin{abstract}
+Classical optimization remains a primary bottleneck in Variational Quantum Eigensolvers (VQEs). Even with exact parameter-shift gradients, the energy landscape mixes narrow, ill-conditioned valleys with near-flat plateaus. First-order methods like Adam and SPSA ignore landscape curvature. Diagonal quantum natural gradient (QNG) accounts for geometry but demands $3p+2$ circuits per step. To bridge this gap, we introduce \textbf{SIGMA-QGD}, an optimizer that extracts a diagonal curvature proxy directly from the temporal variance of parameter-shift gradients along the optimization path, requiring zero extra quantum circuits. We establish a theoretical foundation proving: (1) an asymptotic proportionality between trajectory variance and squared Hessian diagonal elements under local quadraticity and aggregate diagonal dominance ($\delta\sqrt{p} \ll |H_{ii}|$); (2) uniform two-sided bounds on the resulting preconditioner; (3) strict descent guaranteed under an empirical coordinate-wise margin condition; and (4) an ergodic stationarity convergence rate of $\mathcal{O}(1/T)$, scaling as $\mathcal{O}(1/\sqrt{T})$ under finite-shot quantum measurement noise. Validated against exact parameter-shift Hessian diagonals across 10- and 12-qubit TFIM and XXZ spin chains, the variance proxy shows consistent positive correlation (Pearson $r \in [0.57, 0.63]$ on TFIM, $r \approx 0.30$ on XXZ; $p < 10^{-4}$ across $>394{,}000$ evaluations). Across 11 optimizers, SIGMA-QGD achieves an order-of-magnitude lower ground-state energy gap on TFIM and the lowest mean gap on XXZ within a standard $2p+1$ circuit budget, statistically matching natural-gradient and adaptive baselines on 12-qubit XXZ.
+\end{abstract}
+
+\textbf{Keywords:} Variational Quantum Eigensolver (VQE), Classical optimization, Curvature preconditioning, Gradient trajectory variance, Quantum natural gradient.
+
+\newpage
+
+
+\section{Introduction}
+\label{sec:intro}
+
+Variational quantum eigensolvers (VQEs) \cite{peruzzo2014variational,mcclean2016theory} remain a cornerstone algorithm for noisy intermediate-scale quantum (NISQ) hardware. A parameterized quantum circuit prepares a trial state $|\psi(\boldsymbol{\theta})\rangle$ with angles $\boldsymbol{\theta} \in \mathbb{R}^p$. A quantum processor evaluates the expectation value of a target Hamiltonian $H$:
+\begin{equation}
+E(\boldsymbol{\theta}) = \langle \psi(\boldsymbol{\theta}) | H | \psi(\boldsymbol{\theta}) \rangle,
+\label{eq:vqe_cost}
+\end{equation}
+while an external classical optimizer iteratively updates $\boldsymbol{\theta}$ to estimate the ground-state energy $E_0 = \min_{\boldsymbol{\theta}} E(\boldsymbol{\theta})$.
+
+Although parameter-shift rules \cite{mitarai2018quantum,schuld2019evaluating} provide unbiased analytic gradients, optimizing $E(\boldsymbol{\theta})$ remains difficult. The cost landscape alternates between barren, gradient-starved plateaus and steep, highly anisotropic valleys \cite{mcclean2018barren,cerezo2021cost,wierichs2020avoiding}. Existing optimizers navigate this trade-off with clear compromises:
+\begin{itemize}
+    \item \textbf{Adaptive first-order methods} (Adam, RMSProp, Yogi, AdaBelief \cite{kingma2014adam,tieleman2012lecture,zaheer2018adaptive,zhuang2020adabelief}) rescale parameter updates via running gradient moments. However, they assume gradient statistics are isotropic and stationary, frequently stalling on plateaus or overshooting narrow ravines.
+    \item \textbf{Quantum natural gradient (QNG)} \cite{stokes2020quantum,wierichs2020avoiding} rescales steps using the Fubini--Study metric. While geometrically robust, diagonal QNG requires $p+1$ extra state-overlap circuits per step, inflating the per-iteration circuit cost from $2p+1$ to $3p+2$.
+    \item \textbf{Derivative-free methods} (SPSA, COBYLA \cite{spall1992multivariate,novak2025benchmarking}) bypass parameter shifts to cut circuit counts, but discard curvature information and struggle on anisotropic surfaces.
+\end{itemize}
+
+We investigate a practical question: can an optimizer extract meaningful curvature information directly from standard parameter-shift gradients without executing any additional quantum circuits?
+
+To address this, we introduce \textbf{SIGMA-QGD} (Sampled Iterative Gradient Moment Adaptation for Quantum Gradient Descent). Rather than querying hardware for metric tensors or higher-order derivatives, SIGMA-QGD maintains an online Bessel-corrected Welford accumulator \cite{welford1962note} for each parameter coordinate along the trajectory. When a parameter oscillates rapidly across iterations, its high temporal variance signals steep local curvature and triggers damping. Conversely, steady, low-variance gradients signal flatter terrain, allowing the optimizer to accelerate.
+
+\paragraph{Contributions.}
+\begin{itemize}
+    \item \textbf{Theoretical Foundation (Section~\ref{sec:theory}):} We derive an explicit variance--curvature relation linking trajectory variance to $H_{ii}^2$ (Prop.~\ref{prop:variance_curvature}), prove uniform two-sided bounds on the preconditioner (Prop.~\ref{prop:boundedness}), establish a descent guarantee under an empirical coordinate-wise margin condition (Prop.~\ref{prop:descent}), and prove ergodic stationarity rates of $\mathcal{O}(1/T)$ in the noiseless setting and $\mathcal{O}(1/\sqrt{T})$ under finite-shot measurement noise (Thm.~\ref{thm:convergence}).
+    \item \textbf{Direct Curvature Validation (Section~\ref{sec:exp_proxy}):} We test Proposition 1 directly, measuring Pearson and Spearman correlations between our online variance estimator and the exact parameter-shift diagonal Hessian.
+    \item \textbf{Comprehensive Benchmarks (Sections~\ref{sec:setup}--\ref{sec:results}):} We benchmark 11 optimizers on TFIM and XXZ models, including learning-rate sweeps, component ablations, finite-shot noise sweeps, and circuit-matched comparisons against CMA-ES.
+\end{itemize}
+
+
+\section{Related Work}
+\label{sec:related}
+
+\paragraph{Adaptive first-order optimizers.}
+AdaGrad, RMSProp~\cite{tieleman2012lecture}, Adam~\cite{kingma2014adam}, and Yogi~\cite{zaheer2018adaptive} rescale updates using uncentered second moments $\mathbb{E}[g_i^2] = (\mathbb{E}[g_i])^2 + \operatorname{Var}[g_i]$. Because uncentered moments conflate a large constant slope ($|\mathbb{E}[g_i]| \gg 0$ on a tilted flat plane) with high curvature ($\operatorname{Var}[g_i] \gg 0$), they  shrink step sizes along steady descent slopes. AdaBelief~\cite{zhuang2020adabelief} centers gradients around the exponential moving momentum $m_{t,i}$, coupling the preconditioner to momentum lag. In contrast, SIGMA-QGD computes the Bessel-corrected sample variance around the gradient's own running mean via Welford's algorithm ($\operatorname{Var}[g_i] = \mathbb{E}[g_i^2] - \bar{g}_i^2$), subtracting out the mean slope $\bar{g}_i \approx g_i(\boldsymbol{\theta}^*)$ so the preconditioner isolates the quadratic curvature term $H_{ii}^2 \operatorname{Var}[\theta_i]$ (Proposition~\ref{prop:variance_curvature}).
+
+\paragraph{Natural-gradient and curvature methods.}
+QNG \cite{stokes2020quantum} updates $\boldsymbol{\theta}_{t+1} = \boldsymbol{\theta}_t - \eta G^{-1}\mathbf{g}_t$, where $G$ is the Fubini--Study metric. Full and block-diagonal QNG require $\mathcal{O}(p^2)$ circuits, while diagonal QNG requires $p+1$ additional metric evaluations. Hamiltonian-aware QNG \cite{shi2025hamiltonian} builds a pullback metric from individual Pauli expectation values; however, it requires storing and inverting a $p \times p$ Jacobian and is sensitive to shot noise on non-commuting Pauli terms. Stein-identity QFI estimation \cite{halla2025stein} and QN-SPSA \cite{gacon2021simultaneous} estimate curvature via random perturbations, introducing Monte Carlo sampling noise and step-size hyperparameters. Hybrid QN-SPSA with parameter-shift gradients \cite{qnspsa_psr_2024} retains this perturbation noise. SIGMA-QGD operates entirely on the total energy gradient in $\mathcal{O}(p)$ time and memory, requires no matrix inversion, and filters shot noise over time.
+
+\paragraph{Exact diagonal Hessians.}
+For single-qubit Pauli rotation gates $U_i(\theta_i) = \exp(-i \frac{\theta_i}{2} P_i)$ with $P_i \in \{X,Y,Z\}$, generator eigenvalues are $\pm 1/2$. Consequently, the energy expectation along coordinate $\theta_i$ is a single-frequency sinusoid:
+\begin{equation}
+E(\theta_i) = A_i \cos(\theta_i + \phi_i) + C_i,
+\label{eq:sinusoid_form}
+\end{equation}
+yielding $g_i = -A_i \sin(\theta_i + \phi_i)$ and $H_{ii} = -A_i \cos(\theta_i + \phi_i) = -(E(\boldsymbol{\theta}) - C_i)$. The central difference:
+\begin{equation}
+H_{ii}(\boldsymbol{\theta}) = \frac{1}{2}\left(E\left(\boldsymbol{\theta} + \frac{\pi}{2}\mathbf{e}_i\right) + E\left(\boldsymbol{\theta} - \frac{\pi}{2}\mathbf{e}_i\right) - 2E(\boldsymbol{\theta})\right)
+\label{eq:exact_hessian}
+\end{equation}
+is algebraically exact \cite{wierichs2022general}. Because the forward and backward shifted evaluations are already executed to compute the parameter-shift gradient (Eq.~\eqref{eq:param_shift}), evaluating Eq.~\eqref{eq:exact_hessian} requires only one unshifted evaluation $E(\boldsymbol{\theta})$, totaling $2p+1$ circuits. We implement this exact signal in two baselines: Hess-Mag (scaling updates by $|H_{ii}| + \lambda_{\text{reg}}$) and Diag-Hessian (Levenberg--Marquardt diagonal Newton).
+
+Why estimate curvature via trajectory variance if exact $H_{ii}$ costs only $2p+1$ circuits? Three structural reasons motivate this choice:
+\begin{enumerate}
+    \item \textbf{Zero extra circuits beyond gradient evaluation ($2p$ vs.\ $2p+1$):} Standard parameter-shift gradients require $2p$ circuits. Evaluating Eq.~\eqref{eq:exact_hessian} requires the unshifted circuit $E(\boldsymbol{\theta})$~\cite{mari2021estimating,wierichs2022general}. Although many VQE workflows evaluate $E(\boldsymbol{\theta})$ for progress logging ($2p+1$ circuits, which we adopt across all benchmarks for fair comparison), SIGMA-QGD's update rule depends solely on $\mathbf{g}_t$ and executes strictly $2p$ circuits whenever intermediate energy logging is omitted.
+    \item \textbf{Generality across gate generators:} The two-shift Hessian identity in Eq.~\eqref{eq:exact_hessian} holds only for generators with two equidistant eigenvalues $\pm 1/2$~\cite{mari2021estimating}. Under general parameter-shift rules (PSR/EPSR) for multi-qubit entangling gates, QAOA mixers, or fermionic excitations (e.g., UCCSD)~\cite{wierichs2022general}, exact diagonal second derivatives require $4$- to $8$-point shift rules or $\mathcal{O}(R^2)$ shifts for $R$-frequency spectra, multiplying circuit and shot overhead. In contrast, trajectory variance remains strictly zero-extra-circuit for arbitrary gate spectra.
+    \item \textbf{Stability across inflection points:} In periodic quantum landscapes, instantaneous second derivatives $H_{ii}(\boldsymbol{\theta}_t)$ change sign and cross zero ($H_{ii} \approx 0$). In instantaneous schemes, the inverse factor $(|H_{ii}| + \lambda_{\text{reg}})^{-1}$ spikes to $1/\lambda_{\text{reg}} = 200$ (for $\lambda_{\text{reg}} = 0.005$), launching wild parameter updates. In contrast, the accumulated variance of SIGMA-QGD's $\hat{\sigma}_i^2(t)$ aggregates the dispersion of the gradient over iterations, providing a strictly positive curvature memory that never collapses at isolated inflection points.
+\end{enumerate}
+
+\paragraph{Quasi-Newton line search constraints.}
+Classical quasi-Newton algorithms (L-BFGS-B, non-linear CG) require line searches (Armijo or Wolfe conditions) to guaranty descent and maintain positive-definiteness. In a quantum setting, this results in a massive surge in fresh circuit executions per iteration, which depletes the available computational budget.  Furthermore, shot noise causes line-search tests to accept uphill steps or loop indefinitely. We therefore benchmark all methods under fixed per-step budgets using tuned learning rates. Table~\ref{tab:positioning} summarizes the positioning of representative VQE optimizers across structural and cost axes.
+
+\begin{table*}[htbp]
+\centering
+\small
+\caption{Positioning of representative VQE optimizers.}
+\label{tab:positioning}
+\begin{tabular}{lcccc}
+\toprule
+\textbf{Method} & \textbf{Curvature-Aware} & \textbf{Extra Circuit Type} & \textbf{Circuits / Step} & \textbf{Descent Guarantee} \\
+\midrule
+COBYLA \cite{powell1994direct} & No & None & $1$ & No \\
+SPSA \cite{spall1992multivariate} & No & None & $3$ & Stochastic \\
+\addlinespace[2pt]
+Adam \cite{kingma2014adam} & No & None & $2p$ (or $2p+1$) & Empirical \\
+AdaBelief \cite{zhuang2020adabelief} & Partial (Mom. Var) & None & $2p$ (or $2p+1$) & Empirical \\
+\addlinespace[2pt]
+Diag-QNG \cite{stokes2020quantum} & Yes (QFI metric) & Metric Overlaps & $3p+2$ & Yes (Metric) \\
+Hess-Mag (This work) & Yes (Exact $|H_{ii}|$) & None & $2p+1$ & Empirical \\
+Diag-Hessian (This work) & Yes (Exact $H_{ii}$) & None & $2p+1$ & Yes (LM-Safeguard) \\
+L-BFGS-B / CG & Yes (Secant approx.) & Line Searches & $2p + \mathcal{O}(k)$ & Line-search dependent \\
+\midrule
+\textbf{SIGMA-QGD (Ours)} & \textbf{Yes (Trajectory Proxy)} & \textbf{None} & $\mathbf{2p\text{ (or }2p+1\text{)}}$ & \textbf{Yes (Empirical Margin)} \\
+\bottomrule
+\end{tabular}%
+\end{table*}
+
+\FloatBarrier
+
+\section{Methodology and Theoretical Analysis}
+\label{sec:theory}
+
+\subsection{Problem Setup and Notation}
+Let $H = \sum_k c_k P_k$ be a Hamiltonian represented as a linear combination of Pauli strings $P_k \in \{I, X, Y, Z\}^{\otimes n}$. We consider a hardware-efficient ansatz \cite{kandala2017hardware} with $n$ qubits and $r$ repeated layers. Each layer consists of parameterized single-qubit $RY(\theta_{l,j})$ rotations followed by a linear chain of CNOT gates, yielding $p = n \cdot r$ parameters.
+
+Parameters are initialized i.i.d.\ from $\text{Uniform}(-\pi/8, \pi/8)$. Partial derivatives are computed via the exact parameter-shift rule:
+\begin{equation}
+g_i(\boldsymbol{\theta}) = \frac{1}{2} \left[ E\left(\boldsymbol{\theta} + \frac{\pi}{2}\mathbf{e}_i\right) - E\left(\boldsymbol{\theta} - \frac{\pi}{2}\mathbf{e}_i\right) \right].
+\label{eq:param_shift}
+\end{equation}
+We denote elementwise (Hadamard) division by $\mathbf{a} \oslash \mathbf{b}$, where $(\mathbf{a} \oslash \mathbf{b})_i = a_i / b_i$.
+
+\subsection{Online Trajectory Variance Estimation}
+SIGMA-QGD tracks an online Bessel-corrected Welford accumulator \cite{welford1962note} for each parameter coordinate $i \in \{1, \dots, p\}$. At step $t \ge 1$, given gradient vector $\mathbf{g}_t$:
+\begin{align}
+M_{t,i} &= M_{t-1,i} + \frac{g_{t,i} - M_{t-1,i}}{t}, \label{eq:welford_m} \\
+S_{t,i} &= S_{t-1,i} + (g_{t,i} - M_{t-1,i})(g_{t,i} - M_{t,i}). \label{eq:welford_s}
+\end{align}
+For $t \ge 2$, the unbiased sample variance is:
+\begin{equation}
+\hat{\sigma}_i^2(t) = \frac{S_{t,i}}{t - 1}, \quad \text{with } \hat{\sigma}_i^2(1) \equiv 0.
+\label{eq:welford_var}
+\end{equation}
+
+\subsection{Preconditioner Formulation}
+We define the coordinate curvature proxy $F_i(t)$ and preconditioned update vector $\mathbf{d}_t$ as:
+\begin{equation}
+F_i(t) = c \cdot \hat{\sigma}_i^2(t) + \lambda_{\text{reg}}, \qquad \mathbf{d}_t = \hat{\mathbf{m}}_t \oslash \mathbf{F}(t),
+\label{eq:preconditioned_update}
+\end{equation}
+where $c > 0$ is the preconditioner multiplier ($c = 1.0$), and $\lambda_{\text{reg}} > 0$ is the regularization constant. Here, $\lambda_{\text{reg}} = 0.005$ is established as the default operational floor via sensitivity analysis, guaranteeing a maximum step-scaling ceiling of $\lambda_{\text{reg}}^{-1} = 200$ across flat regions. The term $\hat{\mathbf{m}}_t$ is the bias-corrected momentum:
+\begin{equation}
+\mathbf{m}_t = \beta \mathbf{m}_{t-1} + (1-\beta)\mathbf{g}_t, \quad \hat{\mathbf{m}}_t = \frac{\mathbf{m}_t}{1 - \beta^t},
+\label{eq:momentum}
+\end{equation}
+with parameter-adaptive momentum decay:
+\begin{equation}
+\beta = \operatorname{clip}\Bigl(1 - \frac{1}{\sqrt{\max(p, 4)}}, \, 0.5, \, 0.98\Bigr).
+\label{eq:beta_formula}
+\end{equation}
+As shown in Algorithm~\ref{alg:sigma_qgd}, before updating accumulators, $\mathbf{g}_t$ is safeguarded via global $\ell_2$-norm clipping $\mathbf{g}_{c,t} = \mathbf{g}_t \cdot \min(1, \sqrt{p}/\|\mathbf{g}_t\|_2)$, which leaves $\mathbf{g}_t$ unaffected whenever $\|\mathbf{g}_t\|_2 \le \sqrt{p}$.
+
+\subsection{Theoretical Guarantees}
+We now establish the theoretical foundations of the trajectory-variance proxy.
+
+Let $E: \mathbb{R}^p \to \mathbb{R}$ be twice continuously differentiable with gradient $\mathbf{g} = \nabla E$ and Hessian $H = \nabla^2 E$. Consider a sliding window $W_t \subset \{1, \dots, t\}$ of $w$ steps ending at step $t$, with temporal variance:
+\begin{equation}
+\hat{\sigma}_i^2(t) = \frac{1}{w-1} \sum_{\tau \in W_t} \left( g_i(\boldsymbol{\theta}_\tau) - \bar{g}_i(W_t) \right)^2, \quad \bar{g}_i(W_t) = \frac{1}{w} \sum_{\tau \in W_t} g_i(\boldsymbol{\theta}_\tau).
+\end{equation}
+
+\begin{assumption}[Local Quadraticity]
+\label{ass:quadraticity}
+On window $W_t$, $E$ satisfies a second-order Taylor expansion about reference point $\boldsymbol{\theta}^* \in W_t$:
+\begin{equation}
+\mathbf{g}(\boldsymbol{\theta}_\tau) = \mathbf{g}(\boldsymbol{\theta}^*) + H(\boldsymbol{\theta}^*)(\boldsymbol{\theta}_\tau - \boldsymbol{\theta}^*) + \mathbf{R}(\boldsymbol{\theta}_\tau), \quad \|\mathbf{R}(\boldsymbol{\theta}_\tau)\| \le \frac{L}{2} \|\boldsymbol{\theta}_\tau - \boldsymbol{\theta}^*\|^2,
+\end{equation}
+where $L < \infty$ is the local Lipschitz constant of the Hessian.
+\end{assumption}
+
+\begin{assumption}[Aggregate Diagonal Dominance]
+\label{ass:diag_dominance}
+Off-diagonal Hessian elements are bounded by $|H_{ij}(\boldsymbol{\theta}^*)| \le \delta$ for all $i \ne j$, satisfying the aggregate dominance condition $\delta \sqrt{p} \ll |H_{ii}(\boldsymbol{\theta}^*)|$ for active coordinates.
+\end{assumption}
+
+\begin{assumption}[Bounded Gradient and Curvature]
+\label{ass:bounded_curvature}
+Coordinate gradients and diagonal Hessian entries satisfy $|g_i(\boldsymbol{\theta})| \le M$ and $|H_{ii}(\boldsymbol{\theta})| \le M$ for all $\boldsymbol{\theta}$ and coordinate indices $i$. For trigonometric hardware-efficient ansatzes, $M \le \sum_k |c_k|$.
+\end{assumption}
+
+\begin{assumption}[Bounded Window Displacement]
+\label{ass:displacement}
+Trajectory displacement on window $W_t$ satisfies $\|\boldsymbol{\theta}_\tau - \boldsymbol{\theta}^*\| \le r$ for all $\tau \in W_t$.
+\end{assumption}
+
+\begin{assumption}[Coordinate-wise Momentum Alignment]
+\label{ass:alignment}
+At step $t$, bias-corrected momentum and negative gradient share signs coordinate-wise:
+\begin{equation}
+\hat{m}_{t,i} (-g_{t,i}) \ge 0 \quad \forall i \in \{1, \dots, p\}.
+\end{equation}
+\end{assumption}
+
+\begin{remark}[Aggregate Alignment vs. Coordinate-wise Margin]
+A positive inner product $\langle \hat{\mathbf{m}}_t, -\mathbf{g}_t \rangle > 0$ does not guarantee that a diagonal preconditioner will descend. For example, let $\mathbf{F} = (0.1, 0.005)^\top$ and $\hat{\mathbf{m}}_t \odot (-\mathbf{g}_t) = (1.0, -0.5)^\top$. While the unscaled vectors align ($\langle \hat{\mathbf{m}}_t, -\mathbf{g}_t \rangle = 0.5 > 0$), the preconditioned inner product evaluates to:
+\[
+\langle \mathbf{d}_t, -\mathbf{g}_t \rangle = \frac{1.0}{0.1} + \frac{-0.5}{0.005} = 10 - 100 = -90 < 0.
+\]
+The second coordinate's opposing sign is amplified by its small preconditioner value, driving the update uphill. Assumption~\ref{ass:alignment} provides a simple sufficient condition, while Proposition~\ref{prop:descent} formalizes the general necessary and sufficient margin criterion.
+\end{remark}
+
+\begin{lemma}[Local Secant Relation]
+\label{lem:secant}
+Under Assumptions~\ref{ass:quadraticity}, \ref{ass:diag_dominance}, and \ref{ass:displacement}, the coordinate gradient difference satisfies:
+\begin{equation}
+g_i(\boldsymbol{\theta}_\tau) - g_i(\boldsymbol{\theta}^*) = H_{ii}(\boldsymbol{\theta}^*)(\theta_{\tau,i} - \theta_i^*) + \varepsilon_{i,\tau},
+\end{equation}
+where $|\varepsilon_{i,\tau}| \le \delta r \sqrt{p} + \frac{L}{2} r^2$.
+\end{lemma}
+
+\begin{proof}
+Decomposing the Taylor expansion coordinate-wise:
+\begin{equation}
+g_i(\boldsymbol{\theta}_\tau) - g_i(\boldsymbol{\theta}^*) = H_{ii}(\boldsymbol{\theta}^*)(\theta_{\tau,i} - \theta_i^*) + \sum_{j \ne i} H_{ij}(\boldsymbol{\theta}^*)(\theta_{\tau,j} - \theta_j^*) + R_i(\boldsymbol{\theta}_\tau).
+\end{equation}
+Applying Cauchy--Schwarz and Assumption~\ref{ass:diag_dominance}:
+\begin{equation}
+\left| \sum_{j \ne i} H_{ij}(\boldsymbol{\theta}^*)(\theta_{\tau,j} - \theta_j^*) \right| \le \delta \sum_{j=1}^p |\theta_{\tau,j} - \theta_j^*| \le \delta \sqrt{p} \|\boldsymbol{\theta}_\tau - \boldsymbol{\theta}^*\| \le \delta r \sqrt{p}.
+\end{equation}
+Since $\|R_i(\boldsymbol{\theta}_\tau)\| \le \|\mathbf{R}(\boldsymbol{\theta}_\tau)\| \le \frac{L}{2} r^2$, the bound follows.
+\end{proof}
+
+\begin{proposition}[Variance--Curvature Proportionality]
+\label{prop:variance_curvature}
+Under Assumptions~\ref{ass:quadraticity}--\ref{ass:displacement}, the sample variance of the $i$-th gradient component on window $W_t$ satisfies:
+\begin{equation}
+\hat{\sigma}_i^2(t) = H_{ii}(\boldsymbol{\theta}^*)^2 \operatorname{Var}_{W_t}[\theta_i] + \mathcal{R}_i,
+\end{equation}
+where the residual $\mathcal{R}_i$ is bounded by:
+\begin{equation}
+|\mathcal{R}_i| \le 2 M r \left( \delta r \sqrt{p} + \frac{L}{2} r^2 \right) + \left( \delta r \sqrt{p} + \frac{L}{2} r^2 \right)^2 = \mathcal{O}\left( (M \delta \sqrt{p} + \delta^2 p) r^2 + M L r^3 + L^2 r^4 \right).
+\label{eq:prop1_remainder}
+\end{equation}
+When parameters move actively across the window ($\operatorname{Var}_{W_t}[\theta_i] = \Theta(r^2)$), the diagonal curvature term $H_{ii}(\boldsymbol{\theta}^*)^2 \operatorname{Var}_{W_t}[\theta_i]$ dominates the residual provided $\delta \sqrt{p} \ll |H_{ii}(\boldsymbol{\theta}^*)|$ (Assumption~\ref{ass:diag_dominance}) and displacement $r$ is sufficiently small.
+\end{proposition}
+
+\begin{proof}
+Applying the variance operator to Lemma~\ref{lem:secant}:
+\begin{equation}
+\operatorname{Var}_{W_t}[g_i] = H_{ii}(\boldsymbol{\theta}^*)^2 \operatorname{Var}_{W_t}[\theta_i] + 2 H_{ii}(\boldsymbol{\theta}^*) \operatorname{Cov}_{W_t}(\theta_i, \varepsilon_i) + \operatorname{Var}_{W_t}[\varepsilon_i].
+\end{equation}
+By Cauchy--Schwarz, $|\operatorname{Cov}_{W_t}(\theta_i, \varepsilon_i)| \le \sqrt{\operatorname{Var}_{W_t}[\theta_i]} \sqrt{\operatorname{Var}_{W_t}[\varepsilon_i]}$. Since $\|\boldsymbol{\theta}_\tau - \boldsymbol{\theta}^*\| \le r$, we have $\sqrt{\operatorname{Var}_{W_t}[\theta_i]} \le r$ (up to the Bessel factor $\sqrt{\frac{w}{w-1}} = 1 + \mathcal{O}(w^{-1})$). From Lemma~\ref{lem:secant}, $\|\boldsymbol{\varepsilon}_i\|_\infty \le \delta r \sqrt{p} + \frac{L}{2} r^2$. Using $|H_{ii}(\boldsymbol{\theta}^*)| \le M$:
+\begin{equation}
+2 |H_{ii}(\boldsymbol{\theta}^*)| |\operatorname{Cov}_{W_t}(\theta_i, \varepsilon_i)| \le 2 M r \left( \delta r \sqrt{p} + \frac{L}{2} r^2 \right).
+\end{equation}
+Adding $\operatorname{Var}_{W_t}[\varepsilon_i] \le \|\boldsymbol{\varepsilon}_i\|_\infty^2 = (\delta r \sqrt{p} + \frac{L}{2} r^2)^2$ yields Eq.~\eqref{eq:prop1_remainder}.
+\end{proof}
+
+\begin{remark}[Scaling and Full-History Welford Decomposition]
+\label{rem:variance_scaling}
+Standard Newton-Raphson scales steps by $H_{ii}^{-1}$, whereas our proxy scales updates by $(c H_{ii}^2 \operatorname{Var}[\theta_i] + \lambda_{\text{reg}})^{-1}$. Steep, oscillating coordinates are damped quadratically, while flat coordinates ($H_{ii} \approx 0$) remain bounded by $\lambda_{\text{reg}}^{-1} = 200$. Scale invariance under Hamiltonian rescaling $H \to \alpha H$ can be enforced by normalizing cost $E/\Lambda$ with $\Lambda = \sum_k |c_k|$, or setting $\lambda_{\text{reg}} \propto \Lambda^2$. 
+
+To connect the local window analysis of Proposition~\ref{prop:variance_curvature} to the full-history Welford accumulator in Algorithm~\ref{alg:sigma_qgd}, partition the trajectory $\{1,\dots,t\}$ into $K = t/w$ local windows $W_1, \dots, W_K$ with reference points $\boldsymbol{\theta}_k^*$. By the law of total variance, the full-history Welford estimator decomposes as:
+\begin{equation}
+\hat{\sigma}_i^2(t) = \frac{t}{t-1}\left( \frac{1}{K}\sum_{k=1}^K \frac{w-1}{w}\hat{\sigma}_i^2(W_k) + \operatorname{Var}_{k}\!\big[\bar{g}_i(W_k)\big] \right) = \frac{1}{K}\sum_{k=1}^K H_{ii}(\boldsymbol{\theta}_k^*)^2 \operatorname{Var}_{W_k}[\theta_i] + \operatorname{Var}_{k}\!\big[\bar{g}_i(W_k)\big] + \mathcal{O}(\bar{\mathcal{R}}_i).
+\end{equation}
+Thus, full-history accumulation computes the path-averaged squared diagonal curvature plus macroscopic gradient drift. This preserves curvature memory in late-stage plateaus ($\operatorname{Var}_{W_K}[\theta_i] \to 0$) where a memoryless sliding window or exponential moving average would collapse to $\lambda_{\text{reg}}$.
+\end{remark}
+
+\begin{proposition}[Uniform Preconditioner Boundedness]
+\label{prop:boundedness}
+Under Assumptions~\ref{ass:bounded_curvature} and \ref{ass:displacement}, the diagonal preconditioner $F_i(t) = c \hat{\sigma}_i^2(t) + \lambda_{\text{reg}}$ satisfies:
+\begin{equation}
+\lambda_{\text{reg}} \le F_i(t) \le c M^2 r^2 + \lambda_{\text{reg}} + \mathcal{O}(r^2).
+\end{equation}
+With gradient clipping ($\|\mathbf{g}_{c,t}\|_2 \le \sqrt{p}$) and Assumption~\ref{ass:bounded_curvature}, $|g_{c,t,i}| \le G_{\max} \equiv \min(\sqrt{p}, M)$, yielding the unconditional global bound $\lambda_{\text{reg}} \le F_i(t) \le F_{\max} \equiv 2c G_{\max}^2 + \lambda_{\text{reg}}$ for all $t \ge 1$, and coordinate-wise bounds:
+\begin{equation}
+\frac{|\hat{m}_{t,i}|}{F_{\max}} \le |d_{t,i}| \le \frac{|\hat{m}_{t,i}|}{\lambda_{\text{reg}}}.
+\end{equation}
+\end{proposition}
+
+\begin{proof}
+Because $\hat{\sigma}_i^2 \ge 0$, the lower bound follows from $\lambda_{\text{reg}} > 0$. The local upper bound follows from Proposition~\ref{prop:variance_curvature} and $\operatorname{Var}_{W_t}[\theta_i] \le \frac{w}{w-1} r^2$. Globally, since $|g_{c,t,i}| \le G_{\max}$, the unbiased sample variance satisfies $\hat{\sigma}_i^2(t) = \frac{1}{t-1}\sum_{\tau=1}^t (g_{c,\tau,i} - M_{t,i})^2 \le \frac{t}{t-1} G_{\max}^2 \le 2 G_{\max}^2$, establishing $F_{\max}$.
+\end{proof}
+
+\begin{proposition}[Descent Direction Guarantee under Margin Condition]
+\label{prop:descent}
+Let $\mathcal{S}_+ = \{i : \hat{m}_{t,i}(-g_{t,i}) \ge 0\}$ and $\mathcal{S}_- = \{j : \hat{m}_{t,j}(-g_{t,j}) < 0\}$ partition coordinate indices at step $t$. Under Assumptions~\ref{ass:bounded_curvature} and \ref{ass:displacement}, the update direction $\mathbf{d}_t = \hat{\mathbf{m}}_t \oslash \mathbf{F}(t)$ guarantees strict descent ($\langle \mathbf{d}_t, -\mathbf{g}_t \rangle > 0$) if:
+\begin{equation}
+\sum_{i \in \mathcal{S}_+} \frac{\hat{m}_{t,i} (-g_{t,i})}{F_i(t)} > \sum_{j \in \mathcal{S}_-} \frac{|\hat{m}_{t,j} g_{t,j}|}{F_j(t)}.
+\label{eq:margin_condition}
+\end{equation}
+A sufficient condition using the uniform bounds from Proposition~\ref{prop:boundedness} is:
+\begin{equation}
+\sum_{i \in \mathcal{S}_+} \hat{m}_{t,i} (-g_{t,i}) > \kappa \sum_{j \in \mathcal{S}_-} |\hat{m}_{t,j} g_{t,j}|, \qquad \kappa = \frac{F_{\max}}{\lambda_{\text{reg}}}.
+\label{eq:kappa_margin}
+\end{equation}
+When coordinate-wise alignment holds ($\mathcal{S}_- = \emptyset$), descent holds unconditionally: $\langle \mathbf{d}_t, -\mathbf{g}_t \rangle \ge \frac{1}{F_{\max}} \langle \hat{\mathbf{m}}_t, -\mathbf{g}_t \rangle > 0$.
+\end{proposition}
+
+\begin{proof}
+Decomposing the preconditioned inner product:
+\begin{equation}
+\langle \mathbf{d}_t, -\mathbf{g}_t \rangle = \sum_{i \in \mathcal{S}_+} \frac{\hat{m}_{t,i}(-g_{t,i})}{F_i(t)} - \sum_{j \in \mathcal{S}_-} \frac{|\hat{m}_{t,j} g_{t,j}|}{F_j(t)}.
+\end{equation}
+Positivity holds when the first term exceeds the second. Applying the uniform bounds $\lambda_{\text{reg}} \le F_k(t) \le F_{\max}$ yields Eq.~\eqref{eq:kappa_margin}. When $\mathcal{S}_- = \emptyset$, the negative sum vanishes.
+\end{proof}
+
+\paragraph{Dynamical self-damping.}
+Coordinate-wise alignment ($\mathcal{S}_- = \emptyset$) holds empirically in 67.10\% (TFIM) and 71.93\% (XXZ) of coordinate-step pairs. When misalignments occur ($\hat{m}_{t,j} g_{t,j} > 0$), they appear almost exclusively on jittery coordinates oscillating across valley walls. On these coordinates, $\hat{\sigma}_j^2$ is large and inflates $F_j(t) \gg \lambda_{\text{reg}}$, suppressing the negative terms in Eq.~\eqref{eq:margin_condition}. Across all models, $\max_{i,t} F_i(t)/\lambda_{\text{reg}}$ remained in $[12.4, 48.6]$, far below the worst-case bound $\kappa \le 200$--$400$. In practice, $\langle \mathbf{d}_t, -\mathbf{g}_t \rangle > 0$ held in 100.0\% of evaluated optimization steps (200/200).
+
+\begin{theorem}[Non-Convex Stationarity Convergence Rate]
+\label{thm:convergence}
+Let $E: \mathbb{R}^p \to \mathbb{R}$ be $L_g$-smooth with lower-bounded minimum $E^* > -\infty$ (where $L_g, M \le \sum_k |c_k|$ are known a priori from the Hamiltonian Pauli coefficients). Suppose the margin condition of Proposition~\ref{prop:descent} holds with alignment factor $\gamma_0 > 0$ such that $\langle \mathbf{d}_t, -\mathbf{g}_t \rangle \ge \frac{\gamma_0}{F_{\max}} \|\mathbf{g}_t\|_2^2$ (which holds unconditionally when $\beta = 0$ with $\gamma_0 = 1$, or empirically under Proposition~\ref{prop:descent} for $\beta > 0$), where $F_{\max} = 2c G_{\max}^2 + \lambda_{\text{reg}}$ is from Proposition~\ref{prop:boundedness}, and the step size satisfies $\eta_0 < \frac{2\gamma_0 \lambda_{\text{reg}}^2 (1-\beta)}{L_g F_{\max}}$. Then the iterates $\{\boldsymbol{\theta}_{t-1}\}_{t=1}^T$ from Algorithm~\ref{alg:sigma_qgd} satisfy:
+\begin{equation}
+\min_{1 \le t \le T} \|\nabla E(\boldsymbol{\theta}_{t-1})\|_2^2 \le \frac{E(\boldsymbol{\theta}_0) - E^*}{\mathcal{C} \cdot T} = \mathcal{O}\left(\frac{1}{T}\right),
+\label{eq:ergodic_rate}
+\end{equation}
+where $\mathcal{C} = \eta_0 \left( \frac{\gamma_0}{F_{\max}} - \frac{L_g \eta_0}{2 \lambda_{\text{reg}}^2 (1-\beta)} \right) > 0$. With unbiased shot noise $\mathbb{E}[\|\tilde{\mathbf{g}}_t - \nabla E(\boldsymbol{\theta}_{t-1})\|_2^2 \mid \mathcal{F}_{t-1}] \le \sigma_{\text{shot}}^2$, setting $\eta_t = \eta_0 / \sqrt{t}$ yields:
+\begin{equation}
+\min_{1 \le t \le T} \mathbb{E}\left[\|\nabla E(\boldsymbol{\theta}_{t-1})\|_2^2\right] = \mathcal{O}\left(\frac{1}{\sqrt{T}}\right).
+\label{eq:stochastic_rate}
+\end{equation}
+\end{theorem}
+
+\begin{proof}
+By $L_g$-smoothness of $E(\boldsymbol{\theta})$ for $\boldsymbol{\theta}_t = \boldsymbol{\theta}_{t-1} - \eta_0 \mathbf{d}_t$:
+\begin{equation}
+E(\boldsymbol{\theta}_t) \le E(\boldsymbol{\theta}_{t-1}) - \eta_0 \langle \mathbf{g}_t, \mathbf{d}_t \rangle + \frac{L_g \eta_0^2}{2} \|\mathbf{d}_t\|_2^2.
+\end{equation}
+Applying $\langle \mathbf{d}_t, -\mathbf{g}_t \rangle \ge \frac{\gamma_0}{F_{\max}} \|\mathbf{g}_t\|_2^2$ and $\|\mathbf{d}_t\|_2 \le \|\hat{\mathbf{m}}_t\|_2 / \lambda_{\text{reg}}$:
+\begin{equation}
+E(\boldsymbol{\theta}_T) - E(\boldsymbol{\theta}_0) \le -\frac{\eta_0 \gamma_0}{F_{\max}} \sum_{t=1}^T \|\mathbf{g}_t\|_2^2 + \frac{L_g \eta_0^2}{2 \lambda_{\text{reg}}^2} \sum_{t=1}^T \|\hat{\mathbf{m}}_t\|_2^2.
+\end{equation}
+Expressing $\hat{\mathbf{m}}_t = \sum_{\tau=1}^t w_{t,\tau} \mathbf{g}_{c,\tau}$ with convex weights $w_{t,\tau} = \frac{(1-\beta)\beta^{t-\tau}}{1-\beta^t}$, Jensen's inequality and exchanging summation yields $\sum_{t=1}^T \|\hat{\mathbf{m}}_t\|_2^2 \le \frac{1}{1-\beta} \sum_{t=1}^T \|\mathbf{g}_t\|_2^2$. Rearranging with $E(\boldsymbol{\theta}_T) \ge E^*$:
+\begin{equation}
+\mathcal{C} \sum_{t=1}^T \|\mathbf{g}_t\|_2^2 \le E(\boldsymbol{\theta}_0) - E^*.
+\end{equation}
+Bounding $\sum_{t=1}^T \|\mathbf{g}_t\|_2^2 \ge T \min_{1 \le t \le T} \|\mathbf{g}_t\|_2^2$ establishes Eq.~\eqref{eq:ergodic_rate}. Under zero-mean shot noise with variance $\sigma_{\text{shot}}^2$, Welford differences satisfy $|\hat{\sigma}_i^2(t) - \hat{\sigma}_i^2(t-1)| = \mathcal{O}(G_{\max}^2 / t)$. The lagged preconditioner $F_i(t-1)$ incurs an $\mathcal{O}(\eta_t / t)$ bias per step with bounded sum $\sum_t \eta_t / t < \infty$, while conditional variance adds an $\mathcal{O}(L_g \eta_t^2 \sigma_{\text{shot}}^2)$ penalty. Setting $\eta_t = \eta_0 / \sqrt{t}$ yields the $\mathcal{O}(1/\sqrt{T})$ rate \cite{ghadimi2013stochastic}.
+\end{proof}
+
+\subsection{Warmup Schedule and Complete Algorithm}
+To avoid early variance noise, preconditioning activates after a warmup window:
+\begin{equation}
+t_{\text{warm}} = \min(3p, \max(10, \lfloor T / 5 \rfloor)).
+\label{eq:warmup}
+\end{equation}
+Statistically, for sample size $t$, the relative standard error of the sample variance scales as $\sqrt{2/(t-1)}$; enforcing $t_{\text{warm}} \ge 10\text{--}40$ ensures this estimator error drops below $25\%\text{--}45\%$ before preconditioning engages. Empirical tests confirm that final energy gaps are insensitive to warmup lengths across $t_{\text{warm}} \in [10, 50]$.
+
+For $t < t_{\text{warm}}$, the update is standard momentum descent ($\mathbf{d}_t = \hat{\mathbf{m}}_t$). Tracking unshifted energy $E_t$ adds 1 circuit per step for best-iterate selection, giving the benchmark budget of $2p+1$. When only updates are needed, $E_t$ can be omitted to execute in strictly $2p$ circuits per step.
+
+\begin{algorithm}[H]
+\caption{SIGMA-QGD Optimization Algorithm}
+\label{alg:sigma_qgd}
+\begin{algorithmic}[1]
+\REQUIRE Initial parameters $\boldsymbol{\theta}_0 \in \mathbb{R}^p$, learning rate $\eta_0$, multiplier $c=1.0$, regularizer $\lambda_{\text{reg}}=0.005$, max steps $T$.
+\STATE Initialize accumulators $\mathbf{M} \leftarrow \mathbf{0}, \mathbf{S} \leftarrow \mathbf{0}, \mathbf{m} \leftarrow \mathbf{0}$, best energy $E^* \leftarrow \infty, \boldsymbol{\theta}^* \leftarrow \boldsymbol{\theta}_0$.
+\STATE Compute $t_{\text{warm}} = \min(3p, \max(10, \lfloor T/5 \rfloor))$, clip threshold $c_{\text{norm}} = \sqrt{p}$.
+\FOR{$t = 1$ \TO $T$}
+    \STATE Evaluate cost and gradient: $E_t, \mathbf{g}_t \leftarrow \text{CostAndGradient}(\boldsymbol{\theta}_{t-1})$ \hfill \COMMENT{$2p+1$ circuits}
+    \STATE Gradient clipping: $\mathbf{g}_c \leftarrow \mathbf{g}_t \cdot \min(1, c_{\text{norm}} / \|\mathbf{g}_t\|_2)$
+    \STATE Update Welford accumulators $(\mathbf{M}, \mathbf{S})$ with $\mathbf{g}_c$ via Eqs.~\eqref{eq:welford_m}--\eqref{eq:welford_s}
+    \STATE Compute unbiased variance $\hat{\boldsymbol{\sigma}}^2 \leftarrow \mathbf{S} / (t-1)$ for $t \ge 2$, else $\mathbf{0}$
+    \STATE Update momentum: $\mathbf{m} \leftarrow \beta \mathbf{m} + (1-\beta)\mathbf{g}_c$, $\hat{\mathbf{m}} \leftarrow \mathbf{m} / (1-\beta^t)$
+    \IF{$t \ge t_{\text{warm}}$}
+        \STATE $\mathbf{F} \leftarrow c \hat{\boldsymbol{\sigma}}^2 + \lambda_{\text{reg}} \mathbf{1}$
+        \STATE $\mathbf{d}_t \leftarrow \hat{\mathbf{m}} \oslash \mathbf{F}$
+    \ELSE
+        \STATE $\mathbf{d}_t \leftarrow \hat{\mathbf{m}}$
+    \ENDIF
+    \STATE $\boldsymbol{\theta}_t \leftarrow \boldsymbol{\theta}_{t-1} - \eta_0 \mathbf{d}_t$
+    \IF{$E_t < E^*$}
+        \STATE $E^* \leftarrow E_t, \boldsymbol{\theta}^* \leftarrow \boldsymbol{\theta}_{t-1}$
+    \ENDIF
+\ENDFOR
+\RETURN Optimal parameters $\boldsymbol{\theta}^*$, minimum energy $E^*$
+\end{algorithmic}
+\end{algorithm}
+
+\FloatBarrier
+
+\section{Experimental Methodology}
+\label{sec:setup}
+
+\paragraph{Benchmark Hamiltonians.}
+We evaluate two standard periodic spin models:
+\begin{equation}
+H_{\text{TFIM}} = -J \sum_{i=1}^n Z_i Z_{i+1} - h \sum_{i=1}^n X_i, \quad J = 1.0,\ h = 0.5,
+\end{equation}
+with exact ground energies $-10.6356$ ($n=10$) and $-12.7626$ ($n=12$), and
+\begin{equation}
+H_{\text{XXZ}} = J_{xy} \sum_{i=1}^n (X_i X_{i+1} + Y_i Y_{i+1}) + J_z \sum_{i=1}^n Z_i Z_{i+1} + h \sum_{i=1}^n Z_i,
+\end{equation}
+with $J_{xy}=1.0$, $J_z=0.5$, $h=0.1$, and exact ground energies $-15.2761$ ($n=10$) and $-18.2291$ ($n=12$).
+
+\paragraph{Ansatz and initialization.}
+We use a hardware-efficient $RY$--CNOT ansatz with depth $r=3$, yielding $p=30$ ($n=10$) and $p=36$ ($n=12$) parameters. Angles are initialized from $\text{Uniform}(-\pi/8, \pi/8)$ with paired random seeds across all optimizers.
+
+\paragraph{Baselines and circuit accounting.}
+We benchmark 11 optimizers: first-order adaptive methods Adam, AdaBelief, RMSProp, and Yogi ($2p+1$ circuits/step); exact second-order baselines Hess-Mag and Diag-Hessian ($2p+1$, via Eq.~\eqref{eq:exact_hessian}); Diag-QNG ($3p+2$); and derivative-free methods COBYLA (1 call/step), SPSA (3) \cite{spall1992multivariate,spall1997accelerated,spall1998implementation,spall2000adaptive}, QN-SPSA (9) \cite{gacon2021simultaneous}, and budget-matched CMA-ES \cite{novak2025benchmarking}.
+
+\paragraph{Statistical testing.}
+All pairwise differences are evaluated using two-sided paired Wilcoxon signed-rank tests with Holm--Bonferroni step-down corrections.
+
+\FloatBarrier
+
+\section{Empirical Results}
+\label{sec:results}
+
+\subsection{Curvature Proxy Validation}
+\label{sec:exp_proxy}
+To evaluate Proposition~\ref{prop:variance_curvature}, we correlate $\log \hat{\sigma}_i^2$ with $\log |H_{ii}|$ along 200-step runs on both Hamiltonians ($N=15$ seeds). The exact diagonal Hessian is evaluated via Eq.~\eqref{eq:exact_hessian} in parallel without altering the trajectory. Table~\ref{tab:hessian_corr} and Figure~\ref{fig:hessian_corr_consolidated} present the curvature-proxy validation statistics.
+
+\begin{table*}[htbp]
+\centering
+\small
+\caption{Curvature-proxy validation ($N=15$ seeds, 200 steps): log-space Pearson $r$ and Spearman $\rho$ (mean $\pm$ std) with Wilcoxon signed-rank tests against $H_0$: correlation $\le 0$.}
+\label{tab:hessian_corr}
+\begin{tabular}{lcccccc}
+\toprule
+\textbf{Model} & \textbf{Size} & \textbf{Evals/Seed} & \textbf{Pearson $r$} & \textbf{Wilcoxon $p$} & \textbf{Spearman $\rho$} & \textbf{Wilcoxon $p$} \\
+\midrule
+TFIM & 10 qubits ($p=30$) & 5,970 & 0.5665 $\pm$ 0.0577 & $6.1 \times 10^{-5}$ & 0.3715 $\pm$ 0.0998 & $6.1 \times 10^{-5}$ \\
+TFIM & 12 qubits ($p=36$) & 7,164 & 0.6256 $\pm$ 0.0301 & $6.1 \times 10^{-5}$ & 0.4474 $\pm$ 0.0745 & $6.1 \times 10^{-5}$ \\
+XXZ  & 10 qubits ($p=30$) & 5,970 & 0.3196 $\pm$ 0.0829 & $6.1 \times 10^{-5}$ & 0.1162 $\pm$ 0.1416 & $0.010$ \\
+XXZ  & 12 qubits ($p=36$) & 7,164 & 0.2938 $\pm$ 0.0914 & $6.1 \times 10^{-5}$ & 0.1113 $\pm$ 0.1404 & $0.004$ \\
+\bottomrule
+\end{tabular}%
+\end{table*}
+
+\begin{figure}[htbp]
+\centering
+\includegraphics[width=0.88\linewidth]{figures/fig_hessian_correlation_consolidated.pdf}
+\caption{Curvature-proxy validation across 15 seeds. (a) Log-space Pearson $r$ between $\log \hat{\sigma}_i^2$ and $\log |H_{ii}|$. (b) Spearman $\rho$. Diamonds denote means, horizontal bars show medians, and dots represent individual seeds.}
+\label{fig:hessian_corr_consolidated}
+\end{figure}
+
+On TFIM, the log-space correlation is moderate and increases with system size ($r = 0.567 \to 0.626$). On XXZ, the correlation remains positive and statistically significant, though weaker ($r \approx 0.30$; $\rho \approx 0.11$). This discrepancy directly reflects Hamiltonian operator structure. In TFIM, nearest-neighbor $Z_i Z_{i+1}$ terms commute and the transverse field dominates along coordinate axes, keeping off-diagonal Hessian couplings modest ($\delta \sqrt{p} \ll |H_{ii}|$, matching Assumption~\ref{ass:diag_dominance}). In XXZ, non-commuting exchange terms generate strong off-diagonal coupling that cannot be captured by diagonal projections alone, consistent with Hessian scaling analyses in variational algorithms \cite{hessian_resolvability_2026}. Log space is used because variances and curvatures span four orders of magnitude ($10^{-4}$ to $10^0$). 
+
+Quantitatively, under Lemma~\ref{lem:secant}, the unexplained log-variance fraction $1 - r^2$ serves as a direct empirical diagnostic of Assumption~\ref{ass:diag_dominance}: on commuting TFIM, diagonal curvature accounts for $r^2 \in [32.1\%, 39.1\%]$ of total trajectory gradient variance, whereas on frustrated XXZ, non-commuting exchange couplings ($H_{ij}, i \ne j$) account for $1 - r^2 \approx 90.0\%\text{--}91.4\%$ of gradient variance, quantifying the exact regime where $\delta\sqrt{p} \ll |H_{ii}|$ relaxes. Even when explaining only $\sim 10\%$ of total variance on XXZ, however, the proxy preserves positive rank correlation ($\rho \approx 0.11, p \le 0.01$) and prevents erratic steps along high-variance coordinates.
+
+\FloatBarrier
+
+\subsection{Learning-Rate Sweep}
+\label{sec:lr_sweep_results}
+Every gradient-based optimizer was evaluated across a standardized grid $\eta \in \{0.001, 0.005, 0.01, 0.02, 0.05, 0.1\}$ on both Hamiltonians. Table~\ref{tab:lr_sweep_summary} reports optimal step sizes $\eta^*$ and resulting mean gaps.
+
+\begin{table*}[htbp]
+\centering
+\small
+\caption{Learning-rate grid sweep results (200 steps; $N=10$ seeds at 10q, $N=5$ at 12q). Optimal step size $\eta^*$ and mean gap $\Delta E \pm \sigma$.}
+\label{tab:lr_sweep_summary}
+\label{tab:lr_sweep}
+\begin{tabular}{lcccccccc}
+\toprule
+\multirow{2}{*}{\textbf{Method}} & \multicolumn{2}{c}{\textbf{TFIM 10q ($N=10$)}} & \multicolumn{2}{c}{\textbf{TFIM 12q ($N=5$)}} & \multicolumn{2}{c}{\textbf{XXZ 10q ($N=10$)}} & \multicolumn{2}{c}{\textbf{XXZ 12q ($N=5$)}} \\
+\cmidrule(lr){2-3} \cmidrule(lr){4-5} \cmidrule(lr){6-7} \cmidrule(lr){8-9}
+& $\eta^*$ & $\Delta E$ & $\eta^*$ & $\Delta E$ & $\eta^*$ & $\Delta E$ & $\eta^*$ & $\Delta E$ \\
+\midrule
+\textbf{SIGMA-QGD v9.0} & \textbf{0.1} & \textbf{0.0091 $\pm$ 0.0018} & \textbf{0.1} & \textbf{0.0107 $\pm$ 0.0008} & \textbf{0.1} & \textbf{1.2670 $\pm$ 0.5183} & 0.1 & 1.8538 $\pm$ 0.7672 \\
+Adam & 0.1 & 0.1020 $\pm$ 0.1000 & 0.1 & 0.1377 $\pm$ 0.0596 & 0.1 & 2.2947 $\pm$ 0.9253 & 0.1 & 2.3458 $\pm$ 0.8965 \\
+AdaBelief & 0.1 & 0.0751 $\pm$ 0.0858 & 0.1 & 0.1128 $\pm$ 0.0577 & 0.1 & 2.4898 $\pm$ 0.8771 & 0.01 & 1.7934 $\pm$ 0.7127 \\
+Yogi & 0.1 & 0.1092 $\pm$ 0.1070 & 0.1 & 0.1662 $\pm$ 0.0957 & 0.1 & 2.3267 $\pm$ 0.9600 & 0.1 & 2.3921 $\pm$ 0.9049 \\
+RMSProp & 0.01 & 0.3876 $\pm$ 0.0530 & 0.01 & 0.4757 $\pm$ 0.0561 & 0.05 & 2.3214 $\pm$ 0.8798 & \textbf{0.05} & \textbf{1.5795 $\pm$ 0.5941} \\
+Diag-Hessian & 0.1 & 0.4374 $\pm$ 0.0054 & 0.1 & 0.5588 $\pm$ 0.0050 & 0.1 & 1.9296 $\pm$ 0.7444 & 0.1 & 2.4350 $\pm$ 0.8453 \\
+Hess-Mag & 0.001 & 0.4400 $\pm$ 0.0215 & 0.001 & 0.5370 $\pm$ 0.0447 & 0.001 & 2.0225 $\pm$ 0.8297 & 0.001 & 1.9218 $\pm$ 0.6795 \\
+\bottomrule
+\end{tabular}%
+\end{table*}
+
+On the 12-qubit XXZ sweep ($N=5$ seeds), standard errors are large ($\approx 0.27$--$0.34$), allowing RMSProp and AdaBelief to show lower validation means over the small sample. In the full 20-seed benchmark (Section~\ref{sec:benchmark_results}, Table~\ref{tab:main_benchmark_consolidated}), however, SIGMA-QGD achieves the lowest overall mean gap ($1.8408$ vs.\ $1.9248$ for RMSProp), statistically tying with RMSProp ($p_{\text{Holm}} = 0.52$).
+
+\FloatBarrier
+
+\subsection{Hyperparameter Sensitivity}
+\label{sec:sensitivity_results}
+We conducted one-factor-at-a-time sweeps over multiplier $c \in \{0.5, 1, 2, 4, 6\}$ (at $\lambda_{\text{reg}} = 0.001$) and regularizer $\lambda_{\text{reg}} \in \{0.0005, 0.001, 0.005, 0.01, 0.05\}$ (at $c = 1.0$) across $N=15$ seeds. Table~\ref{tab:sensitivity_consolidated} and Figure~\ref{fig:sensitivity_consolidated} summarize these sweeps.
+
+\begin{table*}[htbp]
+\centering
+\small
+\caption{Sensitivity analysis across TFIM and XXZ models ($N=15$ seeds, mean gap $\pm$ std).}
+\label{tab:sensitivity_consolidated}
+\begin{tabular}{llcccc}
+\toprule
+\textbf{Parameter} & \textbf{Value} & \textbf{TFIM 10q} & \textbf{TFIM 12q} & \textbf{XXZ 10q} & \textbf{XXZ 12q} \\
+\midrule
+\multirow{5}{*}{Multiplier $c$} 
+ & $0.5$ & $0.0084 \pm 0.0014$ & $0.0111 \pm 0.0011$ & $1.5685 \pm 0.8114$ & $1.7399 \pm 0.8373$ \\
+ & $1.0$ & $0.0122 \pm 0.0107$ & $0.0157 \pm 0.0110$ & $1.9503 \pm 0.9296$ & $\mathbf{1.6896 \pm 0.6444}$ \\
+ & $2.0$ & $0.0552 \pm 0.0926$ & $0.0502 \pm 0.0319$ & $1.8691 \pm 0.8653$ & $1.9364 \pm 0.7551$ \\
+ & $4.0$ & $0.1065 \pm 0.0864$ & $0.2221 \pm 0.0836$ & $1.6326 \pm 0.7514$ & $2.0130 \pm 0.7714$ \\
+ & $6.0$ & $0.1995 \pm 0.0948$ & $0.3280 \pm 0.0772$ & $1.7735 \pm 0.8112$ & $2.0728 \pm 0.7710$ \\
+\midrule
+\multirow{5}{*}{Regularizer $\lambda_{\text{reg}}$}
+ & $0.0005$ & $0.0510 \pm 0.0839$ & $0.0201 \pm 0.0180$ & $1.7177 \pm 0.8044$ & $1.8095 \pm 0.7121$ \\
+ & $0.001$  & $0.0122 \pm 0.0107$ & $0.0157 \pm 0.0110$ & $1.9503 \pm 0.9296$ & $\mathbf{1.6896 \pm 0.6444}$ \\
+ & $0.005$  & $0.0126 \pm 0.0106$ & $0.0120 \pm 0.0027$ & $1.7189 \pm 0.8648$ & $1.7737 \pm 0.7378$ \\
+ & $0.01$   & $0.0092 \pm 0.0011$ & $0.0123 \pm 0.0017$ & $1.5623 \pm 0.7387$ & $1.7046 \pm 0.7286$ \\
+ & $0.05$   & $0.2183 \pm 0.0979$ & $0.2827 \pm 0.0619$ & $1.5323 \pm 0.7302$ & $1.7952 \pm 0.7866$ \\
+\bottomrule
+\end{tabular}%
+\end{table*}
+
+\begin{figure}[htbp]
+\centering
+\includegraphics[width=0.88\linewidth]{figures/fig_sensitivity_consolidated.pdf}
+\caption{Sensitivity to multiplier $c$ (left) and regularizer $\lambda_{\text{reg}}$ (right) across 15 seeds. Dotted vertical lines mark the deployed parameters ($c=1.0, \lambda_{\text{reg}}=0.005$).}
+\label{fig:sensitivity_consolidated}
+\end{figure}
+
+On TFIM, $c \le 1.0$ outperforms $c \ge 2.0$. The response to $\lambda_{\text{reg}}$ exhibits a convex profile: intermediate values $\lambda_{\text{reg}} \in [10^{-3}, 10^{-2}]$ yield stable convergence, whereas $\lambda_{\text{reg}} = 0.05$ causes severe over-damping. Specifically, $\lambda_{\text{reg}} = 0.005$ achieves minimal sample variance ($\sigma = 0.0027$) and high precision ($0.0120 \pm 0.0027$) on 12-qubit TFIM, while capping the maximum step multiplier at $\lambda_{\text{reg}}^{-1} = 200$. Therefore, we assign $\lambda_{\text{reg}} = 0.005$  for  \textbf{SIGMA-QGD} across all primary benchmarks.
+
+% \FloatBarrier
+
+\subsection{Main Benchmark Results}
+\label{sec:benchmark_results}
+All 11 optimizers were executed across 200 iterations over $N=20$ independent seeds, using optimal step sizes from Table~\ref{tab:lr_sweep_summary}. Exact diagonalization ground states serve as references: $-10.635604$ (TFIM 10q), $-12.762569$ (TFIM 12q), $-15.276131$ (XXZ 10q), and $-18.229090$ (XXZ 12q). Table~\ref{tab:main_benchmark_consolidated} reports mean energy gaps $\Delta E = |E_{\text{opt}} - E_0|$, circuit budgets, and Holm-adjusted $p$-values.
+
+\begin{table*}[htbp]
+\centering
+\small
+\caption{Comprehensive benchmark of SIGMA-QGD v9.0 against 10 baselines ($N=20$ seeds, 200 iterations). Mean gap $\Delta E \pm \sigma$, circuits per run (10q / 12q), and Holm-adjusted Wilcoxon $p$-values against SIGMA-QGD. ``Superior all'': $p_{\text{Holm}} < 0.05$ across all four regimes. ``Superior (3/4)'': significant on TFIM 10q, TFIM 12q, and XXZ 10q ($p_{\text{Holm}} \le 0.006$), with parity or statistical ties on XXZ 12q. Diag-QNG is shown at its full 200-step budget ($+50\%$ circuits); at a matched circuit budget (132 steps), its gaps are $0.428$, $0.441$, $1.821$, and $2.115$.}
+\label{tab:main_benchmark_consolidated}
+\label{tab:benchmark_10q}
+\label{tab:benchmark_12q}
+\setlength{\tabcolsep}{4.5pt}
+\begin{tabular}{lccccccccccc}
+\toprule
+\multirow{2}{*}{\textbf{Optimizer}} & \multirow{2}{*}{$\boldsymbol{\eta^*}$} & \multicolumn{2}{c}{\textbf{TFIM 10q}} & \multicolumn{2}{c}{\textbf{TFIM 12q}} & \multicolumn{2}{c}{\textbf{XXZ 10q}} & \multicolumn{2}{c}{\textbf{XXZ 12q}} & \multirow{2}{*}{\textbf{Circuits}} & \multirow{2}{*}{\textbf{Significance}} \\
+\cmidrule(lr){3-4} \cmidrule(lr){5-6} \cmidrule(lr){7-8} \cmidrule(lr){9-10}
+& & $\Delta E$ & $p_{\text{Holm}}$ & $\Delta E$ & $p_{\text{Holm}}$ & $\Delta E$ & $p_{\text{Holm}}$ & $\Delta E$ & $p_{\text{Holm}}$ & & \\
+\midrule
+\textbf{SIGMA-QGD v9.0} & 0.1 & \textbf{0.0092 $\pm$ 0.0019} & --- & \textbf{0.0112 $\pm$ 0.0013} & --- & \textbf{1.4889 $\pm$ 0.7845} & --- & \textbf{1.8408 $\pm$ 0.8336} & --- & 12,200 / 14,600 & \textbf{Proposed} \\
+\addlinespace[2pt]
+Adam & 0.1 & 0.1074 $\pm$ 0.1128 & $< 10^{-4}$ & 0.1700 $\pm$ 0.1016 & $< 10^{-4}$ & 2.0897 $\pm$ 0.9620 & $0.3 \times 10^{-3}$ & 2.1438 $\pm$ 0.8288 & $0.07$ & 12,200 / 14,600 & Superior (3/4); Comp. \\
+COBYLA & --- & 0.5194 $\pm$ 0.0152 & $< 10^{-4}$ & 0.6781 $\pm$ 0.0142 & $< 10^{-4}$ & 3.5387 $\pm$ 1.2916 & $< 10^{-4}$ & 4.8212 $\pm$ 1.7641 & $< 10^{-4}$ & 200 & Superior all \\
+SPSA & --- & 0.5300 $\pm$ 0.0269 & $< 10^{-4}$ & 0.7259 $\pm$ 0.0496 & $< 10^{-4}$ & 7.0031 $\pm$ 2.4327 & $< 10^{-4}$ & 7.3224 $\pm$ 2.2899 & $< 10^{-4}$ & 600 & Superior all \\
+Diag-QNG & 0.05 & 0.4068 $\pm$ 0.0351 & $< 10^{-4}$ & 0.4172 $\pm$ 0.0755 & $< 10^{-4}$ & 1.6895 $\pm$ 0.8629 & $0.004$ & 1.9602 $\pm$ 0.7913 & $0.49$ & 18,400 / 22,000 & Superior (3/4); Tie \\
+QN-SPSA & --- & 0.9927 $\pm$ 0.1833 & $< 10^{-4}$ & 1.4196 $\pm$ 0.2338 & $< 10^{-4}$ & 9.3955 $\pm$ 1.4751 & $< 10^{-4}$ & 12.0128 $\pm$ 1.3116 & $< 10^{-4}$ & 1,800 & Superior all \\
+AdaBelief & 0.1 & 0.0907 $\pm$ 0.1168 & $< 10^{-4}$ & 0.1421 $\pm$ 0.0959 & $< 10^{-4}$ & 2.0853 $\pm$ 0.9609 & $0.006$ & 2.0653 $\pm$ 0.7821 & $0.16$ & 12,200 / 14,600 & Superior (3/4); Comp. \\
+RMSProp & 0.01 / 0.05 & 0.3996 $\pm$ 0.0470 & $< 10^{-4}$ & 0.4948 $\pm$ 0.0543 & $< 10^{-4}$ & 2.0988 $\pm$ 0.8883 & $< 10^{-4}$ & 1.9248 $\pm$ 0.7486 & $0.52$ & 12,200 / 14,600 & Superior (3/4); Tie \\
+Yogi & 0.1 & 0.1111 $\pm$ 0.1087 & $< 10^{-4}$ & 0.1861 $\pm$ 0.1110 & $< 10^{-4}$ & 2.1026 $\pm$ 0.9648 & $0.002$ & 2.0697 $\pm$ 0.8481 & $0.16$ & 12,200 / 14,600 & Superior (3/4); Comp. \\
+Hess-Mag & 0.001 & 0.4431 $\pm$ 0.0199 & $< 10^{-4}$ & 0.5497 $\pm$ 0.0366 & $< 10^{-4}$ & 2.1303 $\pm$ 0.9442 & $0.006$ & 2.3332 $\pm$ 0.8833 & $0.045$ & 12,200 / 14,600 & Superior all \\
+Diag-Hessian & 0.1 & 0.4384 $\pm$ 0.0043 & $< 10^{-4}$ & 0.5609 $\pm$ 0.0075 & $< 10^{-4}$ & 2.1888 $\pm$ 0.9059 & $0.006$ & 2.7090 $\pm$ 0.9432 & $0.10$ & 12,200 / 14,600 & Superior (3/4); Comp. \\
+\bottomrule
+\end{tabular}%
+\end{table*}
+
+\subsubsection{Performance on the Commuting TFIM Chain}
+On TFIM, SIGMA-QGD achieves an order-of-magnitude accuracy lead over all 10 baselines. At 10 qubits, it reaches $\Delta E = 0.0092 \pm 0.0019$, whereas adaptive baselines AdaBelief ($0.0907$), Adam ($0.1074$), and Yogi ($0.1111$) produce errors $10$--$12\times$ higher. At 12 qubits, SIGMA-QGD scales to $\Delta E = 0.0112 \pm 0.0013$, while competitors degrade to $0.1421$--$0.1861$ ($13$--$17\times$). All TFIM comparisons are statistically superior ($p_{\text{Holm}} < 10^{-4}$). Optimization convergence trajectories across iterations are shown in Figure~\ref{fig:benchmark_convergence}.
+
+\begin{figure}[htbp]
+\centering
+\includegraphics[width=0.95\linewidth]{figures/fig_benchmark_convergence_consolidated.pdf}
+\caption{Optimization convergence trajectories across 20 seeds showing mean energy and log gap $|E - E_0|$: (a) TFIM 10q, (b) TFIM 12q, (c) XXZ 10q, (d) XXZ 12q. Dashed lines mark exact ground-state energies.}
+\label{fig:benchmark_convergence}
+\label{fig:convergence}
+\end{figure}
+
+Furthermore, SIGMA-QGD's standard deviation ($\sigma \approx 0.0013$--$0.0019$) is $50$--$90\times$ tighter than Adam or AdaBelief. As shown in the final energy distributions in Figure~\ref{fig:benchmark_boxplots}, adaptive baselines exhibit lower medians ($\approx 0.05$--$0.08$) but their means are inflated by $15\%$--$20\%$ of runs stalling in local minima ($\Delta E \approx 0.3$--$0.5$). SIGMA-QGD avoids trapping in 20/20 runs, with mean and median matching to three decimal places.
+
+\begin{figure}[htbp]
+\centering
+\includegraphics[width=0.95\linewidth]{figures/fig_benchmark_boxplots_consolidated.pdf}
+\caption{Final ground-state energy distributions across 20 seeds. Horizontal bars indicate medians, red diamonds denote sample means, and jittered points represent seed runs.}
+\label{fig:benchmark_boxplots}
+\label{fig:distributions}
+\end{figure}
+
+\subsubsection{Performance on the  XXZ Chain}
+On the non-commuting XXZ chain, SIGMA-QGD achieves the lowest mean gap at both sizes: $1.4889 \pm 0.7845$ (10q) and $1.8408 \pm 0.8336$ (12q). At 10 qubits, its advantage is statistically significant over all methods, including Diag-QNG ($1.6895$, $p_{\text{Holm}} = 0.004$), despite Diag-QNG consuming 50\% more circuits.
+
+At 12 qubits, SIGMA-QGD significantly outperforms derivative-free and stochastic methods (COBYLA, SPSA, QN-SPSA, all $p_{\text{Holm}} < 10^{-4}$) and Hess-Mag ($p_{\text{Holm}} = 0.045$). Against Adam ($0.07$), Diag-Hessian ($0.10$), AdaBelief and Yogi ($0.16$), RMSProp ($0.52$), and Diag-QNG ($0.49$), confidence intervals overlap on this frustrated surface. Crucially, the statistical tie with Diag-QNG is achieved while saving 34\% of circuit evaluations ($14{,}600$ vs.\ $22{,}000$).
+
+\subsubsection{Circuit Efficiency and Pareto Frontiers}
+Figure~\ref{fig:benchmark_efficiency} plots accuracy against total circuit evaluations. COBYLA ($200$ circuits) and SPSA ($600$) terminate rapidly but stall far from the ground state ($\Delta E > 0.5$ on TFIM, $> 3.5$ on XXZ). Diag-QNG consumes $18{,}400$--$22{,}000$ circuits, yet its TFIM error ($0.4068$) is $44\times$ worse than SIGMA-QGD due to lack of momentum. When Diag-QNG is stopped at an identical circuit budget (132 iterations), its gaps rise to $0.428$ (TFIM 10q) and $2.115$ (XXZ 12q). SIGMA-QGD establishes the high-precision Pareto front across all four regimes.
+
+\begin{figure}[htbp]
+\centering
+\includegraphics[width=0.95\linewidth]{figures/fig_benchmark_efficiency_consolidated.pdf}
+\caption{Circuit Pareto frontier across 20 seeds: log gap versus total circuit executions. The lower-left corner represents optimal performance.}
+\label{fig:benchmark_efficiency}
+\label{fig:distributions_efficiency}
+\end{figure}
+
+\FloatBarrier
+
+\subsection{Component Ablation Study}
+\label{sec:ablation_results}
+We ablated individual components across 15 seeds (200 steps): disabling the preconditioner ($\mathbf{F}=\mathbf{I}$), omitted the  momentum ($\beta=0$),omitted the  clipping ($c_{\text{clip}}=\infty$), and adding parameter-velocity drift correction $\hat{\sigma}_{i,\text{corr}}^2 = \hat{\sigma}_i^2(1 - \overline{\Delta\theta_i^2})$. Table~\ref{tab:ablation} and Figure~\ref{fig:ablation_consolidated} summarize the results.
+
+\begin{table*}[htbp]
+\centering
+\small
+\caption{Component ablation study across 15 seeds (200 steps): mean gap $\Delta E \pm \sigma$, ratio relative to full SIGMA-QGD, and Holm-adjusted $p$-values.}
+\label{tab:ablation}
+\begin{tabular}{lcccccccc}
+\toprule
+\multirow{2}{*}{\textbf{Configuration}} & \multicolumn{2}{c}{\textbf{TFIM 10q}} & \multicolumn{2}{c}{\textbf{TFIM 12q}} & \multicolumn{2}{c}{\textbf{XXZ 10q}} & \multicolumn{2}{c}{\textbf{XXZ 12q}} \\
+\cmidrule(lr){2-3} \cmidrule(lr){4-5} \cmidrule(lr){6-7} \cmidrule(lr){8-9}
+& $\Delta E$ & Ratio ($p_{\text{Holm}}$) & $\Delta E$ & Ratio ($p_{\text{Holm}}$) & $\Delta E$ & Ratio ($p_{\text{Holm}}$) & $\Delta E$ & Ratio ($p_{\text{Holm}}$) \\
+\midrule
+\textbf{Full SIGMA-QGD v9.0} & 0.0095 $\pm$ 0.0021 & $1.00\times$ & 0.0111 $\pm$ 0.0014 & $1.00\times$ & 1.3575 $\pm$ 0.6476 & $1.00\times$ & 1.6880 $\pm$ 0.7614 & $1.00\times$ \\
+No Preconditioner ($\mathbf{F}=\mathbf{I}$) & 0.4562 $\pm$ 0.0292 & $48.25\times$ ($< 10^{-3}$) & 0.5669 $\pm$ 0.0186 & $50.92\times$ ($< 10^{-3}$) & 1.5493 $\pm$ 0.6635 & $1.14\times$ ($0.008$) & 2.0349 $\pm$ 0.7031 & $1.21\times$ ($0.021$) \\
+No Momentum ($\beta=0$) & 0.4202 $\pm$ 0.0820 & $44.44\times$ ($< 10^{-3}$) & 0.5544 $\pm$ 0.0604 & $49.80\times$ ($< 10^{-3}$) & 1.9141 $\pm$ 0.6795 & $1.41\times$ ($0.124$) & 1.9703 $\pm$ 0.5001 & $1.17\times$ ($0.506$) \\
+No Clipping ($c_{\text{clip}}=\infty$) & 0.0094 $\pm$ 0.0021 & $0.99\times$ ($0.606$) & 0.0112 $\pm$ 0.0015 & $1.01\times$ ($0.635$) & 1.3574 $\pm$ 0.6476 & $1.00\times$ ($0.635$) & 1.6880 $\pm$ 0.7614 & $1.00\times$ (n.s.) \\
+With Drift Correction & 0.0090 $\pm$ 0.0019 & $0.95\times$ ($0.606$) & 0.0109 $\pm$ 0.0011 & $0.98\times$ ($0.639$) & 1.3902 $\pm$ 0.6598 & $1.02\times$ ($0.890$) & 1.5979 $\pm$ 0.6847 & $0.95\times$ ($0.188$) \\
+\bottomrule
+\end{tabular}%
+\end{table*}
+
+\begin{figure}[htbp]
+\centering
+\includegraphics[width=0.88\linewidth]{figures/fig_ablation_consolidated.pdf}
+\caption{Ablation results across 15 seeds. Annotations report performance ratios relative to full SIGMA-QGD ($^{***}p<0.001$, $^{**}p<0.01$, $^{*}p<0.05$).}
+\label{fig:ablation_consolidated}
+\end{figure}
+
+On TFIM, removing the preconditioner degrades accuracy by $48$--$51\times$, while removing momentum degrades it by $44$--$50\times$ ($p_{\text{Holm}} < 10^{-3}$ in both cases). On XXZ, the preconditioner remains necessary ($1.14\times$ and $1.21\times$ degradation, $p < 0.05$). Gradient clipping never triggers in normal descent (ratios $0.99$--$1.01$), serving purely as an inactive fail-safe. Velocity drift correction alters gaps by $<5\%$ with no statistical significance ($p \ge 0.188$), confirming that full-history Welford variance stably anchors curvature without explicit detrending.
+
+Replacing full-history Welford accumulation with a short sliding window ($w \in [10, 30]$) or exponential moving variance (EMA) degrades late-stage stability on TFIM (as local variance vanishes on plateaus and spikes step sizes toward $\lambda_{\text{reg}}^{-1}$) while offering no accuracy gain on XXZ, since temporal forgetting cannot remove instantaneous off-diagonal Pauli couplings ($H_{ij}$). On physical hardware subject to slow, non-stationary calibration drift, however, an exponentially weighted Welford accumulator with slow forgetting factor ($\gamma \in [0.99, 0.999]$) or median absolute deviation (MAD) can be substituted to track shifting noise floors.
+
+% \FloatBarrier
+
+\subsection{Finite-Shot Noise and CMA-ES Comparison}
+\label{sec:noise_cma_results}
+We tested SIGMA-QGD across shot counts $M \in \{100, 500, 1000, 5000, 10000\}$ and compared against CMA-ES under $M=1024$ shots at identical circuit budgets ($12{,}200$ circuits at 10q; $14{,}600$ at 12q), with $N=15$ seeds. Final parameters were re-evaluated on statevector simulation to eliminate downward noise-selection bias. Table~\ref{tab:shot_noise_cma_consolidated} and Figure~\ref{fig:shot_noise_cma_consolidated} report these evaluations.
+
+\begin{table*}[htbp]
+\centering
+\small
+\caption{Finite-shot noise scaling (Part I) and CMA-ES comparison (Part II) across 15 seeds.}
+\label{tab:shot_noise_cma_consolidated}
+\begin{tabular}{lcccc}
+\toprule
+\multicolumn{5}{c}{\textbf{Part I: SIGMA-QGD gap vs.\ shots ($|E(\boldsymbol{\theta}^*) - E_0|$)}} \\
+\midrule
+\textbf{Shots ($M$)} & \textbf{TFIM ($n=10$)} & \textbf{TFIM ($n=12$)} & \textbf{XXZ ($n=10$)} & \textbf{XXZ ($n=12$)} \\
+\midrule
+Noiseless ($\infty$) & $0.0098 \pm 0.0023$ & $0.0115 \pm 0.0015$ & $1.3565 \pm 0.6480$ & $1.6883 \pm 0.7615$ \\
+$100$ shots          & $0.4298 \pm 0.1223$ & $0.6109 \pm 0.1751$ & $2.2997 \pm 0.8286$ & $2.5896 \pm 0.8340$ \\
+$500$ shots          & $0.1514 \pm 0.0310$ & $0.2337 \pm 0.0724$ & $1.8139 \pm 0.7896$ & $1.8802 \pm 0.6601$ \\
+$1,000$ shots        & $0.1086 \pm 0.0515$ & $0.1356 \pm 0.0332$ & $1.7688 \pm 0.8078$ & $1.7989 \pm 0.6730$ \\
+$5,000$ shots        & $0.0645 \pm 0.0527$ & $0.0730 \pm 0.0106$ & $1.4169 \pm 0.6596$ & $1.7411 \pm 0.7227$ \\
+$10,000$ shots       & $0.0324 \pm 0.0078$ & $0.0586 \pm 0.0134$ & $1.4037 \pm 0.6428$ & $1.9320 \pm 0.8344$ \\
+\midrule
+\multicolumn{5}{c}{\textbf{Part II: SIGMA-QGD vs.\ CMA-ES ($M=1024$ shots, matched circuits)}} \\
+\midrule
+\textbf{Regime} & \textbf{Circuits} & \textbf{SIGMA-QGD} & \textbf{CMA-ES} & \textbf{Wilcoxon $p$ (Advantage)} \\
+\midrule
+TFIM ($n=10$) & $12,200$ & $0.1042 \pm 0.0306$ & $0.5333 \pm 0.0447$ & $6.10 \times 10^{-5}$ ($5.12\times$) \\
+TFIM ($n=12$) & $14,600$ & $0.1489 \pm 0.0247$ & $0.6721 \pm 0.0463$ & $6.10 \times 10^{-5}$ ($4.51\times$) \\
+XXZ ($n=10$)  & $12,200$ & $1.6874 \pm 0.7592$ & $2.3549 \pm 1.0307$ & $0.0125$ ($1.40\times$) \\
+XXZ ($n=12$)  & $14,600$ & $1.5937 \pm 0.5412$ & $2.3019 \pm 0.7787$ & $0.0043$ ($1.44\times$) \\
+\bottomrule
+\end{tabular}%
+\end{table*}
+
+\begin{figure}[htbp]
+\centering
+\includegraphics[width=0.92\linewidth]{figures/fig_shot_noise_cma_consolidated.pdf}
+\caption{(a) Exact energy gap versus per-circuit shot budget $M$. (b) Circuit-budget-matched comparison against CMA-ES under $M=1024$ shots. Markers show Wilcoxon test significance.}
+\label{fig:shot_noise_cma_consolidated}
+\end{figure}
+
+On 10-qubit TFIM, error drops monotonically from $0.4298$ at $100$ shots to $0.0324$ at $10{,}000$ shots, nearing the noiseless limit ($0.0098$). With finite sampling, each gradient evaluation carries shot noise $\operatorname{Var}[\xi_i] = \sigma_{\text{shot}}^2 / M$. Welford accumulation tracks total variance $\hat{\sigma}_i^2 \approx \sigma_{\text{landscape}}^2 + \sigma_{\text{shot}}^2 / M$. Rather than destabilizing descent, this shot noise acts as an automatic regularization floor that inflates $F_i(t)$, dampening steps when noise is loud and shrinking as precision increases. In matched comparisons against CMA-ES, SIGMA-QGD wins in all four regimes ($p \le 0.0125$).
+
+\FloatBarrier
+
+\subsection{Dimensional Scaling Behavior}
+\label{sec:scaling_results}
+Scaling from $n=10$ to $n=12$ quadruples the Hilbert space dimension ($2^{10} \to 2^{12}$) and expands parameter space from $p=30$ to $36$. Table~\ref{tab:dimensional_scaling} summarizes the dimensional scaling metrics.
+
+\begin{table*}[htbp]
+\centering
+\small
+\caption{Dimensional scaling from 10 to 12 qubits ($N=20$ seeds): energy gaps and degradation ratios $\Delta E_{12\text{q}} / \Delta E_{10\text{q}}$.}
+\label{tab:dimensional_scaling}
+\label{tab:scaling}
+\begin{tabular}{lcccccc}
+\toprule
+\multirow{2}{*}{\textbf{Optimizer}} & \multicolumn{3}{c}{\textbf{TFIM}} & \multicolumn{3}{c}{\textbf{XXZ}} \\
+\cmidrule(lr){2-4} \cmidrule(lr){5-7}
+& \textbf{10q} & \textbf{12q} & \textbf{Ratio} & \textbf{10q} & \textbf{12q} & \textbf{Ratio} \\
+\midrule
+\textbf{SIGMA-QGD v9.0} & $\mathbf{0.0092 \pm 0.0019}$ & $\mathbf{0.0112 \pm 0.0013}$ & $\mathbf{1.22\times}$ & $\mathbf{1.4889 \pm 0.7845}$ & $\mathbf{1.8408 \pm 0.8336}$ & $\mathbf{1.24\times}$ \\
+Adam & $0.1074 \pm 0.1128$ & $0.1700 \pm 0.1016$ & $1.58\times$ & $2.0897 \pm 0.9620$ & $2.1438 \pm 0.8288$ & $1.03\times$ \\
+AdaBelief & $0.0907 \pm 0.1168$ & $0.1421 \pm 0.0959$ & $1.57\times$ & $2.0853 \pm 0.9609$ & $2.0653 \pm 0.7821$ & $0.99\times$ \\
+Diag-Hessian & $0.4384 \pm 0.0043$ & $0.5609 \pm 0.0075$ & $1.28\times$ & $2.1888 \pm 0.9059$ & $2.7090 \pm 0.9432$ & $1.24\times$ \\
+Diag-QNG & $0.4068 \pm 0.0351$ & $0.4172 \pm 0.0755$ & $1.03\times$ & $1.6895 \pm 0.8629$ & $1.9602 \pm 0.7913$ & $1.16\times$ \\
+COBYLA & $0.5194 \pm 0.0152$ & $0.6781 \pm 0.0142$ & $1.31\times$ & $3.5387 \pm 1.2916$ & $4.8212 \pm 1.7641$ & $1.36\times$ \\
+SPSA & $0.5300 \pm 0.0269$ & $0.7259 \pm 0.0496$ & $1.37\times$ & $7.0031 \pm 2.4327$ & $7.3224 \pm 2.2899$ & $1.05\times$ \\
+\bottomrule
+\end{tabular}%
+\end{table*}
+
+On TFIM, SIGMA-QGD's gap increases by only $1.22\times$ despite the $4\times$ larger state space, whereas Adam and AdaBelief degrade by $1.58\times$ and remain $12\times$ worse in final error. On XXZ, the degradation ratio is $1.24\times$, matching baseline rates on that frustrated landscape.
+
+% \FloatBarrier
+
+\section{Discussion}
+\label{sec:discussion}
+
+\paragraph{Temporal accumulation versus instantaneous second derivatives.}
+Why does SIGMA-QGD outperform same-budget exact Hessian baselines (Hess-Mag and Diag-Hessian)? Both methods compute exact $H_{ii}(\boldsymbol{\theta}_t)$ via Eq.~\eqref{eq:exact_hessian}. However, on periodic landscapes, instantaneous second derivatives change rapidly and cross zero. Near inflection points ($H_{ii} \approx 0$), the raw inverse $(|H_{ii}| + \lambda_{\text{reg}})^{-1}$ hits its ceiling $\lambda_{\text{reg}}^{-1} = 200$. Adding momentum does not resolve this: multiplying a 200-fold multiplier by momentum $\hat{\mathbf{m}}_t$ still launches an erratic step that expels parameters from the basin.
+
+SIGMA-QGD behaves differently because it preconditions with temporal variance $\hat{\sigma}_i^2(t)$. Because the sum of squared deviations $\sum_{\tau=1}^t (g_{c,\tau,i} - M_{t,i})^2$ accumulates along the trajectory, it does not drop to zero at isolated inflection points. When momentum is removed ($\beta = 0$), SIGMA-QGD's error on TFIM rises to $\Delta E \approx 0.4202$ (10q) and $0.5544$ (12q), matching Diag-Hessian ($0.4384, 0.5609$) and Hess-Mag ($0.4431, 0.5497$). This confirms that temporal trajectory smoothing is the critical mechanism stabilizing preconditioning on quantum landscapes.
+
+\paragraph{Ansatz expressivity limits on XXZ.}
+On the Heisenberg XXZ chain, adaptive first-order baselines and diagonal QNG reach similar final gaps ($\Delta E \approx 1.5$--$1.8$). The gapless, highly entangled XXZ ground state cannot be represented accurately by a shallow $r=3$ $RY$--CNOT circuit. The residual gap reflects the representational bound of the circuit family itself, rather than premature optimization failure. Furthermore, non-commuting exchange terms ($X_i X_{i+1} + Y_i Y_{i+1}$) create dense off-diagonal curvature, establishing a natural limit for all diagonal curvature methods.
+
+\paragraph{Limitations.}
+\begin{itemize}
+    \item Benchmarks are restricted to hardware-efficient $RY$--CNOT circuits on spin chains; chemistry Hamiltonians and unitary coupled-cluster (UCC) ansatzes remain to be evaluated.
+    \item The curvature correlation is moderate on TFIM ($r^2 \approx 0.32$--$0.39$) and weak on XXZ ($r \approx 0.30$). Theorem~\ref{thm:convergence} guarantees ergodic convergence to first-order stationary points ($\|\nabla E\|_2^2 \le \epsilon$), not to the global ground-state basin.
+    \item All experiments were conducted on statevector simulators with shot noise; validation on physical quantum processors subject to device noise is deferred to future work.
+\end{itemize}
+
+\section{Conclusion}
+\label{sec:conclusion}
+SIGMA-QGD introduces a zero-extra-circuit curvature proxy for VQE optimization by tracking the temporal variance of parameter-shift gradients. We established theoretical bounds on the preconditioner, a descent guarantee under an empirical margin condition, and $\mathcal{O}(1/T)$ / $\mathcal{O}(1/\sqrt{T})$ stationarity convergence rates. Across 11 optimizers on 10- and 12-qubit spin chains, SIGMA-QGD achieves an order-of-magnitude precision lead on TFIM and the lowest mean energy gap on frustrated XXZ within a standard $2p+1$ circuit budget. Future directions include fusing trajectory variance with exact Hessian diagonals, testing on physical NISQ processors, and applying the method to molecular electronic structure problems.
+
+
+\section*{Declarations}
+
+\paragraph{Funding}
+The authors declare that no external funds, grants, or financial support were received for the preparation or execution of this manuscript.
+
+\paragraph{Competing Interests}
+The authors have no competing financial or non-financial interests to declare that are relevant to the content of this article.
+
+\paragraph{Author Contributions}
+All authors contributed to the study conception, design, and analysis.
+\textbf{Arjun E. Naik}: Conceptualization, Methodology, Software, Formal Analysis, Investigation, Validation, Data Curation, Writing -- Original Draft, Writing -- Review \& Editing.
+\textbf{Jitendra Tembhurne}: Supervision, Project Administration, Methodology, Validation, Resources, Writing -- Review \& Editing.
+Both authors read and approved the final manuscript.
+
+\paragraph{Data Availability}
+The numerical datasets, raw per-seed trajectory logs, ground-state energy logs, and evaluation metrics generated during the current study are publicly available in the GitHub repository at \url{https://github.com/Arjun-E-Naik/SIGMA-QGD}.
+
+\paragraph{Code Availability}
+The complete implementation source code for SIGMA-QGD, all 10 baseline optimizers, statistical testing scripts, and automated reproduction pipelines are open source under the MIT License and publicly accessible at \url{https://github.com/Arjun-E-Naik/SIGMA-QGD}.
+
+\paragraph{Ethics Approval and Consent to Participate}
+Not applicable. This manuscript describes computational and theoretical optimization research and does not involve human participants, animal subjects, or sensitive clinical data.
+
+\paragraph{Consent for Publication}
+Not applicable.
+
+\paragraph{Use of Artificial Intelligence}
+No generative artificial intelligence or AI-assisted tools were used to generate figures, experimental data, mathematical proofs, or scientific hypotheses. AI assistance was restricted solely to grammar refinement, syntax formatting, and code linting, in full accordance with Springer Nature author guidelines on generative AI.
+
+
+
+\begin{thebibliography}{99}
+
+\bibitem{peruzzo2014variational}
+A.~Peruzzo, P.~McClean, P.~Shadbolt, M.-H.~Yung, X.-Q.~Zhou, P.~J.~Love, A.~Aspuru-Guzik, and J.~L.~O'Brien,
+\newblock ``A variational eigenvalue solver on a photonic quantum processor,''
+\newblock \emph{Nat. Commun.}, vol.~5, p.~4213, 2014. \doi{10.1038/ncomms5213}
+
+\bibitem{mcclean2016theory}
+J.~R.~McClean, J.~Romero, R.~Babbush, and A.~Aspuru-Guzik,
+\newblock ``The theory of variational hybrid quantum-classical algorithms,''
+\newblock \emph{New J. Phys.}, vol.~18, no.~2, p.~023023, 2016. \doi{10.1088/1367-2630/18/2/023023}
+
+\bibitem{mitarai2018quantum}
+K.~Mitarai, M.~Negoro, M.~Kitagawa, and K.~Fujii,
+\newblock ``Quantum circuit learning,''
+\newblock \emph{Phys. Rev. A}, vol.~98, no.~3, p.~032309, 2018. \doi{10.1103/PhysRevA.98.032309}
+
+\bibitem{schuld2019evaluating}
+M.~Schuld, V.~Bergholm, C.~Gogolin, J.~Izaac, and N.~Killoran,
+\newblock ``Evaluating analytic gradients on quantum hardware,''
+\newblock \emph{Phys. Rev. A}, vol.~99, no.~3, p.~032331, 2019. \doi{10.1103/PhysRevA.99.032331}
+
+\bibitem{mcclean2018barren}
+J.~R.~McClean, S.~Boixo, V.~N.~Smelyanskiy, R.~Babbush, and H.~Neven,
+\newblock ``Barren plateaus in quantum neural network training landscapes,''
+\newblock \emph{Nat. Commun.}, vol.~9, p.~4812, 2018. \doi{10.1038/s41467-018-07090-4}
+
+\bibitem{cerezo2021cost}
+M.~Cerezo, A.~Sone, T.~Volkoff, L.~Cincio, and P.~J.~Coles,
+\newblock ``Cost function dependent barren plateaus in shallow parametrized quantum circuits,''
+\newblock \emph{Nat. Commun.}, vol.~12, p.~1791, 2021. \doi{10.1038/s41467-021-21728-w}
+
+\bibitem{kingma2014adam}
+D.~P.~Kingma and J.~Ba,
+\newblock ``Adam: A method for stochastic optimization,''
+\newblock in \emph{Proc. 3rd Int. Conf. Learn. Represent. (ICLR)}, 2015. \url{https://arxiv.org/abs/1412.6980}
+
+\bibitem{tieleman2012lecture}
+T.~Tieleman and G.~Hinton,
+\newblock ``Lecture 6.5---RMSProp: Divide the gradient by a running average of its recent magnitude,''
+\newblock \emph{COURSERA: Neural Networks for Machine Learning}, 2012.
+
+\bibitem{zaheer2018adaptive}
+M.~Zaheer, S.~Reddi, D.~Sachan, S.~Kale, and S.~Kumar,
+\newblock ``Adaptive methods for nonconvex optimization,''
+\newblock \emph{Adv. Neural Inf. Process. Syst. (NeurIPS)}, vol.~31, pp.~2331--2341, 2018.
+
+\bibitem{zhuang2020adabelief}
+J.~Zhuang, T.~Tang, Y.~Ding, S.~C.~Tatikonda, N.~Dvornek, X.~Papademetris, and J.~Duncan,
+\newblock ``AdaBelief optimizer: Adapting stepsizes by the belief in observed gradients,''
+\newblock \emph{Adv. Neural Inf. Process. Syst. (NeurIPS)}, vol.~33, pp.~18795--18806, 2020.
+
+\bibitem{stokes2020quantum}
+J.~Stokes, J.~Izaac, N.~Killoran, and G.~Carleo,
+\newblock ``Quantum natural gradient,''
+\newblock \emph{Quantum}, vol.~4, p.~269, 2020. \doi{10.22331/q-2020-05-25-269}
+
+\bibitem{wierichs2020avoiding}
+D.~Wierichs, C.~Gogolin, and M.~Kastoryano,
+\newblock ``Avoiding local minima in variational quantum eigensolvers with the natural gradient,''
+\newblock \emph{Phys. Rev. Research}, vol.~2, no.~4, p.~043246, 2020. \doi{10.1103/PhysRevResearch.2.043246}
+
+\bibitem{spall1992multivariate}
+J.~C.~Spall,
+\newblock ``Multivariate stochastic approximation using a simultaneous perturbation gradient approximation,''
+\newblock \emph{IEEE Trans. Autom. Control}, vol.~37, no.~3, pp.~332--341, 1992. \doi{10.1109/9.119995}
+
+\bibitem{novak2025benchmarking}
+V.~Nov{\'a}k, I.~Zelinka, and V.~Sn{\'a}{\v{s}}el,
+\newblock ``Optimization strategies for variational quantum algorithms in noisy landscapes,''
+\newblock \emph{arXiv:2506.01715}, 2025. \url{https://arxiv.org/abs/2506.01715}
+
+\bibitem{shi2025hamiltonian}
+C.~Shi and H.~Wang,
+\newblock ``Efficient Hamiltonian-aware quantum natural gradient descent for variational quantum eigensolvers,''
+\newblock \emph{arXiv:2511.14511}, 2025. \url{https://arxiv.org/abs/2511.14511}
+
+\bibitem{halla2025stein}
+M.~Halla,
+\newblock ``Estimation of quantum Fisher information via Stein's identity in variational quantum algorithms,''
+\newblock \emph{arXiv:2502.17231}, 2025. \url{https://arxiv.org/abs/2502.17231}
+
+\bibitem{mari2021estimating}
+A.~Mari, T.~R.~Bromley, and N.~Killoran,
+\newblock ``Estimating the gradient and higher-order derivatives on quantum hardware,''
+\newblock \emph{Phys. Rev. A}, vol.~103, no.~1, p.~012405, 2021. \doi{10.1103/PhysRevA.103.012405}
+
+\bibitem{wierichs2022general}
+D.~Wierichs, J.~Izaac, C.~Wang, and C.~Y.-Y.~Lin,
+\newblock ``General parameter-shift rules for quantum gradients,''
+\newblock \emph{Quantum}, vol.~6, p.~677, 2022. \doi{10.22331/q-2022-03-30-677}
+
+\bibitem{powell1994direct}
+M.~J.~D.~Powell,
+\newblock ``A direct search optimization method that models the objective and constraint functions by linear interpolation,''
+\newblock in \emph{Advances in Optimization and Numerical Analysis}, pp.~51--67, Springer, Dordrecht, 1994. \doi{10.1007/978-94-015-8330-5_4}
+
+\bibitem{kandala2017hardware}
+A.~Kandala, A.~Mezzacapo, K.~Temme, M.~Takita, M.~Brink, J.~M.~Chow, and J.~M.~Gambetta,
+\newblock ``Hardware-efficient variational quantum eigensolver for small molecules and quantum magnets,''
+\newblock \emph{Nature}, vol.~549, pp.~242--246, 2017. \doi{10.1038/nature23879}
+
+\bibitem{welford1962note}
+B.~P.~Welford,
+\newblock ``Note on a method for calculating corrected sums of squares and products,''
+\newblock \emph{Technometrics}, vol.~4, no.~3, pp.~419--420, 1962. \doi{10.1080/00401706.1962.10490022}
+
+\bibitem{gacon2021simultaneous}
+J.~Gacon, C.~Zoufal, G.~Carleo, and S.~Woerner,
+\newblock ``Simultaneous perturbation stochastic approximation of the quantum Fisher information,''
+\newblock \emph{Quantum}, vol.~5, p.~567, 2021. \doi{10.22331/q-2021-10-21-567}
+
+\bibitem{spall1997accelerated}
+J.~C.~Spall,
+\newblock ``Accelerated second-order stochastic optimization using only function measurements,''
+\newblock in \emph{Proc. 36th IEEE Conf. Decis. Control (CDC)}, vol.~2, pp.~1417--1424, 1997. \doi{10.1109/CDC.1997.657661}
+
+\bibitem{spall1998implementation}
+J.~C.~Spall,
+\newblock ``Implementation of the simultaneous perturbation algorithm for stochastic optimization,''
+\newblock \emph{IEEE Trans. Aerosp. Electron. Syst.}, vol.~34, no.~3, pp.~817--823, 1998. \doi{10.1109/7.705889}
+
+\bibitem{spall2000adaptive}
+J.~C.~Spall,
+\newblock ``Adaptive simultaneous perturbation stochastic approximation for simulated systems,''
+\newblock \emph{IEEE Trans. Aerosp. Electron. Syst.}, vol.~36, no.~2, pp.~439--448, 2000. \doi{10.1109/7.845238}
+
+\bibitem{qnspsa_psr_2024}
+D.-T.~Le, V.-L.~Nguyen, H.~C.~Nguyen, Q.-H.~Nguyen, and V.-D.~Nguyen,
+\newblock ``Variational quantum eigensolver: A comparative analysis of classical and quantum optimizer methods,''
+\newblock \emph{arXiv:2412.19176}, 2024. \url{https://arxiv.org/abs/2412.19176}
+
+\bibitem{hessian_resolvability_2026}
+Y.~Huang and Y.~Wang,
+\newblock ``Analysis of Hessian scaling for local and global costs in variational quantum algorithms,''
+\newblock \emph{arXiv:2602.00783}, 2026. \url{https://arxiv.org/abs/2602.00783}
+
+\bibitem{ghadimi2013stochastic}
+S.~Ghadimi and G.~Lan,
+\newblock ``Stochastic first- and zeroth-order methods for nonconvex stochastic programming,''
+\newblock \emph{SIAM J. Optim.}, vol.~23, no.~4, pp.~2341--2368, 2013. \doi{10.1137/120880177}
+
+\end{thebibliography}
+
+\end{document}
