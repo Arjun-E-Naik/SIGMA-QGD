@@ -34,6 +34,16 @@
 \newtheorem{definition}{Definition}
 \newtheorem{assumption}{Assumption}
 
+%% --- Restore robust table environment (bypassing threeparttable resizebox conflict) ---
+\makeatletter
+\renewenvironment{table}[1][]%
+{\begin{tableorg}[#1]\centering}%
+{\end{tableorg}}
+\renewenvironment{table*}[1][]%
+{\begin{tableorg}[#1]\centering}%
+{\end{tableorg}}
+\makeatother
+
 \raggedbottom
 
 \title[SIGMA-QGD: Variance-Aware Curvature Proxy for VQEs]{SIGMA-QGD: A Zero-Extra-Circuit, Variance-Aware Curvature Proxy for Variational Quantum Eigensolvers}
